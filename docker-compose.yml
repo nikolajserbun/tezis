@@ -1,0 +1,158 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tezis}
+      POSTGRES_USER: ${POSTGRES_USER:-tezis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tezis}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tezis} -d ${POSTGRES_DB:-tezis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8080/}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-dev-only-change-me}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      AUTO_CREATE_TABLES: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tezis}:${POSTGRES_PASSWORD:-tezis}@postgres:5432/${POSTGRES_DB:-tezis}
+      REDIS_URL: redis://redis:6379/0
+      BOT_MODE: ${BOT_MODE:-polling}
+      SEARXNG_URL: http://searxng:8080
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    # WSL2 DNS can resolve api.telegram.org to an address unreachable from containers.
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
+    volumes:
+      - ./backend/assets:/app/assets:ro
+      - ./backups:/app/backups
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      AUTO_CREATE_TABLES: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tezis}:${POSTGRES_PASSWORD:-tezis}@postgres:5432/${POSTGRES_DB:-tezis}
+      REDIS_URL: redis://redis:6379/0
+    command: ["arq", "app.worker.WorkerSettings"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
+    volumes:
+      - ./backend/assets:/app/assets:ro
+
+  bot:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    profiles: ["polling"]
+    env_file: .env
+    environment:
+      AUTO_CREATE_TABLES: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tezis}:${POSTGRES_PASSWORD:-tezis}@postgres:5432/${POSTGRES_DB:-tezis}
+      REDIS_URL: redis://redis:6379/0
+      BOT_MODE: polling
+    command: ["python", "-m", "app.bot.runner"]
+    depends_on:
+      api:
+        condition: service_healthy
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
+    volumes:
+      - ./backend/assets:/app/assets:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-}
+        VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-tezis_ai_bot}
+        VITE_ADMIN_TELEGRAM_LOGIN: ${VITE_ADMIN_TELEGRAM_LOGIN:-}
+        VITE_DEV_PAYMENTS: ${VITE_DEV_PAYMENTS:-true}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["prod"]
+    env_file: .env
+    environment:
+      DOMAIN: ${DOMAIN:-tezis.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - frontend
+      - api
+
+volumes:
+  pg_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
