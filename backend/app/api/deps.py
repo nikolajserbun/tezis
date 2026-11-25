@@ -53,13 +53,13 @@ def require_roles(*roles: str) -> Callable:
 
 
 def require_staff() -> Callable:
-    return require_roles(
-        UserRole.MANAGER.value, UserRole.ADMIN.value, UserRole.OWNER.value
-    )
+    """Admin API is owner-only; manager/admin roles grant no access."""
+    return require_owner()
 
 
 def require_admin() -> Callable:
-    return require_roles(UserRole.ADMIN.value, UserRole.OWNER.value)
+    """Alias of require_owner for existing call sites."""
+    return require_owner()
 
 
 def require_owner() -> Callable:

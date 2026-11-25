@@ -14,6 +14,7 @@ def defaults() -> dict[str, Any]:
         "support_username": "tezis_support",
         "referral_bonus_minor": settings.referral_bonus_minor,
         "free_generations": settings.free_generations,
+        "free_neurons": settings.free_neurons,
         "maintenance_mode": False,
         "community_chat_id": settings.community_chat_id,
         "stars_rub_rate": settings.stars_rub_rate,
@@ -64,6 +65,14 @@ async def get_int(session: AsyncSession, key: str, default: int = 0) -> int:
     value = await get_value(session, key, default)
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+async def get_float(session: AsyncSession, key: str, default: float = 0.0) -> float:
+    value = await get_value(session, key, default)
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return default
 

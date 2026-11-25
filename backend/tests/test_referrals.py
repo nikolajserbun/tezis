@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import settings
 from app.core.errors import PaymentError, ValidationError
+from app.models import UsageEvent
 from app.services import ai, chat, referrals
 
 
@@ -58,15 +60,24 @@ async def test_first_studio_generation_also_activates_bonus(session, user, refer
 async def test_no_bonus_when_quota_is_exhausted(session, user, referrer) -> None:
     await referrals.capture_referral(session, user, referrer.referral_code)
     await session.commit()
-    for index in range(5):
-        await chat.ask(
-            session,
-            user=user,
-            brand=None,
-            message=f"Вопрос {index}",
-            web_search=False,
-        )
-    with pytest.raises(PaymentError):
+
+    # The first request pays the referral bonus once.
+    await chat.ask(
+        session,
+        user=user,
+        brand=None,
+        message="Первый вопрос",
+        web_search=False,
+    )
+    await session.refresh(referrer)
+    assert referrer.balance_minor == 2500
+
+    session.add(
+        UsageEvent(user_id=user.id, kind="chat", tokens=0, neurons=settings.free_neurons)
+    )
+    await session.commit()
+
+    with pytest.raises(PaymentError, match="Neurons"):
         await chat.ask(
             session,
             user=user,

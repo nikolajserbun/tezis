@@ -242,6 +242,7 @@ async def main() -> None:
                 "support_username": "tezis_support",
                 "referral_bonus_minor": app_settings.referral_bonus_minor,
                 "free_generations": app_settings.free_generations,
+                "free_neurons": app_settings.free_neurons,
                 "maintenance_mode": False,
                 "community_chat_id": app_settings.community_chat_id,
                 "stars_rub_rate": app_settings.stars_rub_rate,

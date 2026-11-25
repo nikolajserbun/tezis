@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.core.utils import aware, utcnow
+from app.core.utils import aware, ensure_aware, utcnow
 from app.models import (
     Generation,
     Product,
@@ -58,10 +58,74 @@ async def _used_free_requests(session: AsyncSession, user_id: UUID) -> int:
     return generations + messages
 
 
+async def _used_neurons(
+    session: AsyncSession,
+    user_id: UUID,
+    *,
+    subscription_id: UUID | None = None,
+    since: datetime | None = None,
+) -> float:
+    """Sum Neurons from usage events, optionally within one subscription period."""
+    stmt = select(UsageEvent.neurons, UsageEvent.created_at).where(
+        UsageEvent.user_id == user_id
+    )
+    if subscription_id is None:
+        stmt = stmt.where(UsageEvent.subscription_id.is_(None))
+    else:
+        stmt = stmt.where(UsageEvent.subscription_id == subscription_id)
+    rows = (await session.execute(stmt)).all()
+    start = ensure_aware(since) if since is not None else None
+    total = 0.0
+    for value, created in rows:
+        if start is not None:
+            normalized = ensure_aware(created)
+            if normalized is None or normalized < start:
+                continue
+        total += float(value or 0)
+    return total
+
+
+async def _used_free_neurons(session: AsyncSession, user_id: UUID) -> float:
+    """Neurons spent without a subscription; paid usage has its own quota."""
+    return await _used_neurons(session, user_id)
+
+
+def _generation_limit(user: User, base: int) -> int:
+    return max(base + int(user.generations_bonus or 0), 0)
+
+
+def _neuron_limit(user: User, base: float) -> float:
+    """An admin override applies to any user; without it, paid users have no cap."""
+    if user.neurons_limit_override is not None:
+        return max(float(user.neurons_limit_override) + float(user.neurons_bonus or 0), 0.0)
+    if base <= 0:
+        return 0.0
+    return max(base + float(user.neurons_bonus or 0), 0.0)
+
+
+async def free_neuron_limit(session: AsyncSession) -> float:
+    return max(
+        await settings_service.get_float(session, "free_neurons", settings.free_neurons),
+        0.0,
+    )
+
+
+async def _paid_neuron_usage(
+    session: AsyncSession, user: User, sub: Subscription
+) -> tuple[float, float]:
+    limit = _neuron_limit(user, 0.0)
+    if limit <= 0:
+        return 0.0, 0.0
+    used = await _used_neurons(
+        session, user.id, subscription_id=sub.id, since=sub.current_period_start
+    )
+    return used, limit
+
+
 async def check_limit(
     session: AsyncSession, user: User
-) -> tuple[bool, Subscription | None, bool, int, int]:
-    """Return (allowed, subscription, is_free, used, limit)."""
+) -> tuple[bool, Subscription | None, bool, float, float, float, float]:
+    """Return (allowed, subscription, is_free, used, limit, neurons_used, neurons_limit)."""
     sub = await get_active(session, user.id)
     if sub is not None:
         now = utcnow()
@@ -75,15 +139,27 @@ async def check_limit(
             sub.current_period_end = now + timedelta(days=min(duration, 30))
             sub.generations_used = 0
             await session.flush()
-        limit = max(sub.generations_limit, 0)
+        limit = _generation_limit(user, sub.generations_limit)
         used = sub.generations_used
-        return used < limit, sub, False, used, limit
+        neurons_used, neurons_limit = await _paid_neuron_usage(session, user, sub)
+        allowed = used < limit and (neurons_limit <= 0 or neurons_used < neurons_limit)
+        return allowed, sub, False, used, limit, neurons_used, neurons_limit
 
+    neurons_limit = _neuron_limit(user, await free_neuron_limit(session))
+    neurons_used = await _used_free_neurons(session, user.id)
+    used = await _used_free_requests(session, user.id)
     free_limit = await settings_service.get_int(
         session, "free_generations", settings.free_generations
     )
-    used = await _used_free_requests(session, user.id)
-    return used < free_limit, None, True, used, free_limit
+    return (
+        neurons_used < neurons_limit,
+        None,
+        True,
+        used,
+        _generation_limit(user, free_limit),
+        neurons_used,
+        neurons_limit,
+    )
 
 
 async def record_generation(session: AsyncSession, sub: Subscription | None) -> None:
@@ -95,14 +171,18 @@ async def record_generation(session: AsyncSession, sub: Subscription | None) -> 
 async def usage(session: AsyncSession, user: User) -> UsageOut:
     sub = await get_active(session, user.id)
     if sub is not None:
-        left = max(sub.generations_limit - sub.generations_used, 0)
+        limit = _generation_limit(user, sub.generations_limit)
+        neurons_used, neurons_limit = await _paid_neuron_usage(session, user, sub)
         return UsageOut(
             has_subscription=True,
             plan_title=sub.product.title if sub.product else None,
-            generations_limit=sub.generations_limit,
+            generations_limit=limit,
             generations_used=sub.generations_used,
-            generations_left=left,
+            generations_left=max(limit - sub.generations_used, 0),
             free_generations_left=0,
+            neurons_limit=neurons_limit,
+            neurons_used=neurons_used,
+            neurons_left=max(neurons_limit - neurons_used, 0.0),
             expires_at=sub.expires_at,
         )
 
@@ -110,12 +190,18 @@ async def usage(session: AsyncSession, user: User) -> UsageOut:
         session, "free_generations", settings.free_generations
     )
     used = await _used_free_requests(session, user.id)
+    neuron_limit = _neuron_limit(user, await free_neuron_limit(session))
+    neuron_used = await _used_free_neurons(session, user.id)
+    generation_limit = _generation_limit(user, free_limit)
     return UsageOut(
         has_subscription=False,
-        generations_limit=free_limit,
+        generations_limit=generation_limit,
         generations_used=used,
         generations_left=0,
-        free_generations_left=max(free_limit - used, 0),
+        free_generations_left=max(generation_limit - used, 0),
+        neurons_limit=neuron_limit,
+        neurons_used=neuron_used,
+        neurons_left=max(neuron_limit - neuron_used, 0.0),
     )
 
 

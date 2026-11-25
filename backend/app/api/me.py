@@ -231,6 +231,7 @@ async def chat_ask(
         tokens=answer.tokens,
         cost_minor=answer.cost_minor,
         generations_left=answer.generations_left,
+        neurons_left=answer.neurons_left,
         created_at=answer.message.created_at,
     )
 

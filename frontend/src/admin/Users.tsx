@@ -1,18 +1,31 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useApi, type Order, type Role, type Subscription, type User } from '../lib/api'
+import { useApi, type Order, type Subscription, type User } from '../lib/api'
 import { Badge, Field, Modal, PageHeader } from '../components/ui'
 import { copyToClipboard, date, money, shortId } from '../lib/format'
-import { ROLE_LABELS, ROLES } from './types'
+import { ROLE_LABELS } from './types'
 import { DataState, Pagination, RowActions, ToastHost, useAdminActions } from './shared'
 
-function UserDetails({ user }: { user: User }) {
+function UserDetails({ user, canManage }: { user: User; canManage: boolean }) {
   const orders = useApi<Order[]>(`/api/v1/admin/users/${user.id}/orders`)
   const subscriptions = useApi<Subscription[]>(`/api/v1/admin/users/${user.id}/subscriptions`)
+  const { toast, notify, hideToast, busy, run } = useAdminActions()
+
+  async function revoke(subscription: Subscription) {
+    const result = await run<Subscription>(
+      `/api/v1/admin/subscriptions/${subscription.id}/cancel`,
+      { method: 'POST' },
+    )
+    if (result) {
+      notify('Подписка снята')
+      subscriptions.reload()
+    }
+  }
 
   return (
-    <div className="mt-5 grid gap-5 border-t border-ink-100 pt-5 sm:grid-cols-2">
-      <div>
-        <h3 className="label">Заказы</h3>
+    <>
+      <div className="mt-5 grid gap-5 border-t border-ink-100 pt-5 sm:grid-cols-2">
+        <div>
+          <h3 className="label">Заказы</h3>
         <DataState loading={orders.loading} error={orders.error} onRetry={orders.reload} empty={!orders.data?.length}>
           <div className="space-y-2">
             {orders.data?.map((order) => (
@@ -34,23 +47,37 @@ function UserDetails({ user }: { user: User }) {
                 <span className="truncate">{subscription.product_title ?? 'Без названия'}</span>
                 <span className="whitespace-nowrap text-xs text-ink-500">до {date(subscription.expires_at)}</span>
                 <Badge value={subscription.status} />
+                {canManage && subscription.status === 'active' && (
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm whitespace-nowrap"
+                    disabled={busy}
+                    onClick={() => void revoke(subscription)}
+                  >
+                    Снять
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </DataState>
       </div>
-    </div>
+      </div>
+      <ToastHost message={toast} onClose={hideToast} />
+    </>
   )
 }
 
-export default function UsersSection({ canManage, isOwner }: { canManage: boolean; isOwner: boolean }) {
+export default function UsersSection({ canManage }: { canManage: boolean }) {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [offset, setOffset] = useState(0)
   const [editing, setEditing] = useState<User | null>(null)
-  const [role, setRole] = useState<Role>('user')
   const [isBlocked, setIsBlocked] = useState(false)
   const [delta, setDelta] = useState('')
+  const [bonusGenerations, setBonusGenerations] = useState('')
+  const [bonusNeurons, setBonusNeurons] = useState('')
+  const [neuronsLimit, setNeuronsLimit] = useState('')
   const { toast, notify, hideToast, busy, run } = useAdminActions()
 
   useEffect(() => {
@@ -68,9 +95,11 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
 
   function openEditor(user: User) {
     setEditing(user)
-    setRole(user.role)
     setIsBlocked(user.is_blocked)
     setDelta('')
+    setBonusGenerations(String(user.generations_bonus ?? 0))
+    setBonusNeurons(String(user.neurons_bonus ?? 0))
+    setNeuronsLimit(user.neurons_limit_override === null ? '' : String(user.neurons_limit_override))
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -81,10 +110,18 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
       notify('Корректировка баланса должна быть целым числом копеек')
       return
     }
-    const body: { role?: Role; is_blocked: boolean; balance_delta_minor?: number } = {
+    const body: {
+      is_blocked: boolean
+      balance_delta_minor?: number
+      generations_bonus: number
+      neurons_bonus: number
+      neurons_limit_override: number | null
+    } = {
       is_blocked: isBlocked,
+      generations_bonus: Number(bonusGenerations) || 0,
+      neurons_bonus: Number(bonusNeurons) || 0,
+      neurons_limit_override: neuronsLimit.trim() === '' ? null : Number(neuronsLimit),
     }
-    if (isOwner) body.role = role
     if (rawDelta) body.balance_delta_minor = Number(rawDelta)
 
     const result = await run<User>(`/api/v1/admin/users/${editing.id}`, {
@@ -102,7 +139,7 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
     <>
       <PageHeader
         title="Пользователи"
-        subtitle="Поиск, роли, блокировки и корректировка баланса."
+        subtitle="Поиск, блокировки, бонусы, лимиты и корректировка баланса."
       />
 
       <section className="card p-5">
@@ -131,6 +168,7 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
                       <th>Пользователь</th>
                       <th>Роль</th>
                       <th>Баланс</th>
+                      <th>Лимиты</th>
                       <th>Статус</th>
                       <th>Регистрация</th>
                       <th>Действия</th>
@@ -150,6 +188,16 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
                         </td>
                         <td><span className="badge badge-neutral">{ROLE_LABELS[user.role] ?? user.role}</span></td>
                         <td className="whitespace-nowrap">{money(user.balance_minor)}</td>
+                        <td className="whitespace-nowrap text-xs text-ink-600">
+                          <p>Доп. ген.: {user.generations_bonus}</p>
+                          <p>Доп. Neurons: {user.neurons_bonus}</p>
+                          <p>
+                            Лимит:{' '}
+                            {user.neurons_limit_override === null
+                              ? 'по умолчанию'
+                              : user.neurons_limit_override}
+                          </p>
+                        </td>
                         <td>
                           {user.is_blocked ? (
                             <span className="badge badge-red">Заблокирован</span>
@@ -202,17 +250,48 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
               <p className="hint">Telegram ID: {editing.tg_id} · ID: {shortId(editing.id)}</p>
             </div>
 
-            {isOwner ? (
-              <Field label="Роль">
-                <select className="select" value={role} onChange={(event) => setRole(event.target.value as Role)}>
-                  {ROLES.map((item) => (
-                    <option key={item} value={item}>{ROLE_LABELS[item]}</option>
-                  ))}
-                </select>
+            <p className="hint">
+              Роль «{ROLE_LABELS[editing.role] ?? editing.role}» определяется Telegram ID из
+              OWNER_TG_ID и не назначается вручную.
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Доп. генерации (±)" hint="Плюс добавить, минус забрать.">
+                <input
+                  className="input"
+                  type="number"
+                  step={1}
+                  value={bonusGenerations}
+                  onChange={(event) => setBonusGenerations(event.target.value)}
+                  placeholder="0"
+                />
               </Field>
-            ) : (
-              <p className="hint">Менять роль может только владелец.</p>
-            )}
+              <Field label="Доп. Neurons (±)" hint="Прибавляется к лимиту ниже.">
+                <input
+                  className="input"
+                  type="number"
+                  step="any"
+                  value={bonusNeurons}
+                  onChange={(event) => setBonusNeurons(event.target.value)}
+                  placeholder="0"
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Лимит Neurons для пользователя"
+              hint="Пусто — общий лимит из FREE_NEURONS (у подписчиков лимита нет). Число ≥ 1 задаёт персональный бюджет."
+            >
+              <input
+                className="input"
+                type="number"
+                step="any"
+                min={1}
+                value={neuronsLimit}
+                onChange={(event) => setNeuronsLimit(event.target.value)}
+                placeholder="По умолчанию"
+              />
+            </Field>
 
             <label className="flex items-center gap-2 text-sm text-ink-800">
               <input
@@ -235,7 +314,7 @@ export default function UsersSection({ canManage, isOwner }: { canManage: boolea
               />
             </Field>
 
-            <UserDetails user={editing} />
+            <UserDetails user={editing} canManage={canManage} />
 
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" className="btn-ghost" onClick={() => setEditing(null)}>Отмена</button>

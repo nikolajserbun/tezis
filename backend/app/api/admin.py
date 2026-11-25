@@ -14,7 +14,7 @@ from app.api.deps import (
     require_staff,
 )
 from app.core.db import SessionLocal, get_session
-from app.core.errors import Forbidden, NotFound, ServiceUnavailable, ValidationError
+from app.core.errors import NotFound, ServiceUnavailable, ValidationError
 from app.core.utils import rub_to_stars
 from app.models import (
     AuditLog,
@@ -29,7 +29,6 @@ from app.models import (
     ReferralEarning,
     Subscription,
     User,
-    UserRole,
 )
 from app.schemas import (
     AuditLogOut,
@@ -149,12 +148,14 @@ async def update_user(
     if user is None:
         raise NotFound("Пользователь не найден")
 
-    if payload.role is not None:
-        if actor.role != UserRole.OWNER.value:
-            raise Forbidden("Менять роли может только владелец")
-        if payload.role not in {item.value for item in UserRole}:
-            raise ValidationError("Неизвестная роль")
-        user.role = payload.role
+    fields = payload.model_fields_set
+    if "generations_bonus" in fields and payload.generations_bonus is not None:
+        user.generations_bonus = payload.generations_bonus
+    if "neurons_bonus" in fields and payload.neurons_bonus is not None:
+        user.neurons_bonus = payload.neurons_bonus
+    if "neurons_limit_override" in fields:
+        # Explicit null resets the personal cap back to the global free_neurons.
+        user.neurons_limit_override = payload.neurons_limit_override
     if payload.is_blocked is not None:
         user.is_blocked = payload.is_blocked
     if payload.balance_delta_minor is not None:
@@ -438,7 +439,12 @@ async def cancel_subscription(
     actor: User = Depends(require_admin()),
     session: AsyncSession = Depends(get_session),
 ) -> SubscriptionOut:
-    sub = await session.get(Subscription, subscription_id)
+    stmt = (
+        select(Subscription)
+        .options(selectinload(Subscription.product))
+        .where(Subscription.id == subscription_id)
+    )
+    sub = await session.scalar(stmt)
     if sub is None:
         raise NotFound("Подписка не найдена")
     sub = await subscriptions.cancel(session, sub)

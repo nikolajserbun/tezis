@@ -1,5 +1,5 @@
 import { Badge, EmptyState, ErrorState, PageHeader, Spinner } from '../components/ui'
-import { date, plural } from '../lib/format'
+import { date, neurons, plural } from '../lib/format'
 import type { Subscription } from '../lib/api'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle } from './parts'
@@ -37,10 +37,13 @@ export function HomeScreen() {
   const { usage, user } = me
   const subscription = useMiniApi<Subscription | null>('/api/v1/me/subscription', [ordersVersion])
 
-  const limit = usage.generations_limit || usage.free_generations_left || 0
-  const progress = limit > 0 ? Math.min(100, Math.round((usage.generations_used / limit) * 100)) : 0
+  const neuronLimited = usage.neurons_limit > 0
+  const limit = neuronLimited ? usage.neurons_limit : usage.generations_limit
+  const used = neuronLimited ? usage.neurons_used : usage.generations_used
+  const left = neuronLimited ? usage.neurons_left : usage.generations_left
+  const progress = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
   const firstName = user.first_name?.trim() || 'друг'
-  const leftLabel = plural(usage.generations_left, ['генерация', 'генерации', 'генераций'])
+  const leftLabel = plural(left, ['генерация', 'генерации', 'генераций'])
 
   return (
     <div className="space-y-6">
@@ -63,11 +66,14 @@ export function HomeScreen() {
 
         <div className="mt-5 flex items-end justify-between gap-3">
           <p className="font-display text-3xl font-semibold text-ink-900">
-            {usage.generations_left}
-            <span className="ml-2 text-sm font-sans font-normal text-ink-500">{leftLabel}</span>
+            {neuronLimited ? neurons(left) : left}
+            {!neuronLimited && (
+              <span className="ml-2 text-sm font-sans font-normal text-ink-500">{leftLabel}</span>
+            )}
           </p>
           <p className="hint">
-            Использовано {usage.generations_used} из {limit}
+            Использовано {neuronLimited ? neurons(used) : used} из{' '}
+            {neuronLimited ? neurons(limit) : limit}
           </p>
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink-100">
@@ -77,9 +83,9 @@ export function HomeScreen() {
           />
         </div>
         <p className="hint mt-3">
-          {usage.has_subscription && usage.expires_at
+          {usage.has_subscription && usage.expires_at && !neuronLimited
             ? `Подписка активна до ${date(usage.expires_at)}`
-            : `Бесплатных генераций осталось: ${usage.free_generations_left}`}
+            : `Лимит Neurons: ${neurons(usage.neurons_left)} из ${neurons(usage.neurons_limit)}`}
         </p>
       </section>
 

@@ -25,7 +25,8 @@ CHAT_INTRO = (
     "💬 <b>Чат с ИИ</b>\n\n"
     "Пишите вопросы простым текстом — я учту ваш профиль бренда и отвечу по "
     "встроенной базе знаний или свежим материалам.\n\n"
-    "Один вопрос списывает одну генерацию из лимита. "
+    "Бесплатно доступно 500 Neurons на аккаунт; с подпиской лимита обычно нет. "
+    "Расход зависит от модели и длины ответа.\n\n"
     "Чтобы выйти, нажмите «Завершить диалог» или напишите «выход»."
 )
 
@@ -66,7 +67,7 @@ async def chat_exit(callback: CallbackQuery, state: FSMContext, user: User) -> N
         await edit_message(
             callback,
             "Диалог завершён. Выберите действие в меню.",
-            reply_markup=kb.main_menu(is_staff=user.is_staff),
+            reply_markup=kb.main_menu(is_owner=user.is_owner),
         )
 
 
@@ -83,7 +84,7 @@ async def chat_message(
     if question.lower() in EXIT_WORDS:
         await state.clear()
         await message.answer(
-            "Диалог завершён.", reply_markup=kb.main_menu(is_staff=user.is_staff)
+            "Диалог завершён.", reply_markup=kb.main_menu(is_owner=user.is_owner)
         )
         return
     if len(question) > MAX_QUESTION:
@@ -109,7 +110,11 @@ async def chat_message(
         await message.answer(f"⚠️ {exc.message}", reply_markup=kb.chat_mode())
         return
 
-    chunks = chunk_text(_plain(answer.message.content))
+    text = _plain(answer.message.content)
+    neurons_left = float(getattr(answer, "neurons_left", 0.0) or 0.0)
+    if neurons_left > 0:
+        text = f"{text}\n\nОсталось {neurons_left:g} Neurons."
+    chunks = chunk_text(text)
     for index, chunk in enumerate(chunks):
         last = index == len(chunks) - 1
         await message.answer(

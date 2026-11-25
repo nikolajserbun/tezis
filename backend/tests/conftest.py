@@ -17,6 +17,8 @@ os.environ["SEARXNG_URL"] = ""
 # Unit tests must not call a paid AI provider from a local .env.
 os.environ["AI_PROVIDER"] = "mock"
 os.environ["AI_API_KEY"] = ""
+os.environ["FREE_NEURONS"] = "500"
+os.environ["AI_NEURONS_PER_1K_TOKENS"] = "25"
 
 import pytest
 import pytest_asyncio

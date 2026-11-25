@@ -59,7 +59,9 @@ class Settings(BaseSettings):
     ai_model: str = "gpt-4o-mini"
     ai_max_tokens: int = 1800
     ai_cost_per_1k_minor: int = 50  # 0.50 RUB per 1K tokens (planning assumption)
-    free_generations: int = 5
+    ai_neurons_per_1k_tokens: float = 25.0  # fallback when provider has no Neurons field
+    free_neurons: float = 500.0  # per-account budget without a subscription
+    free_generations: int = 5  # legacy counter, kept for compatibility
     generation_history_days: int = 30
     tavily_api_key: str = ""
     serper_api_key: str = ""

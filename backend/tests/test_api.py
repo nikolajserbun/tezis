@@ -24,6 +24,8 @@ async def test_me_returns_profile(client, user_headers) -> None:
     payload = response.json()
     assert payload["user"]["username"] == "tester"
     assert payload["usage"]["has_subscription"] is False
+    assert payload["usage"]["neurons_limit"] == 500
+    assert payload["usage"]["neurons_left"] == 500
 
 
 @pytest.mark.asyncio

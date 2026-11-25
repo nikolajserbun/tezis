@@ -56,7 +56,7 @@ HELP = (
 )
 
 PAYWALL = (
-    "💎 <b>Бесплатные генерации закончились</b>\n\n"
+    "💎 <b>Бесплатный лимит Neurons исчерпан</b>\n\n"
     "Чтобы продолжать создавать контент без ограничений, выберите тариф. "
     "Оплата проходит через Telegram Stars — карта не нужна.\n\n"
     "Можно начать с Start за 200 ₽/мес: 15 генераций, контент-план и история."
@@ -174,17 +174,19 @@ def order_card(order: Order) -> str:
 def profile_text(user: User, usage, orders_count: int) -> str:
     plan = usage.plan_title if usage.has_subscription else "Free"
     if usage.has_subscription:
+        quota_label = "Генерации"
         quota = f"{usage.generations_used}/{usage.generations_limit} использовано"
         expiry = usage.expires_at.strftime("%d.%m.%Y") if usage.expires_at else "—"
     else:
-        quota = f"осталось {usage.free_generations_left} бесплатных"
+        quota_label = "Лимит"
+        quota = f"осталось {usage.neurons_left:g} Neurons"
         expiry = "—"
     return (
         f"👤 <b>Личный кабинет</b>\n\n"
         f"Имя: {user.display_name}\n"
         f"ID: <code>{user.tg_id}</code>\n"
         f"Тариф: <b>{plan}</b>\n"
-        f"Генерации: {quota}\n"
+        f"{quota_label}: {quota}\n"
         f"Действует до: {expiry}\n"
         f"Баланс: <b>{money(user.balance_minor)}</b>\n"
         f"Заказов: {orders_count}\n\n"

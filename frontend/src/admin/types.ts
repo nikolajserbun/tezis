@@ -41,12 +41,10 @@ export interface ReferralEarning {
   created_at: string
 }
 
-export const ROLES: Role[] = ['user', 'manager', 'admin', 'owner']
-
 export const ROLE_LABELS: Record<Role, string> = {
   user: 'Пользователь',
-  manager: 'Менеджер',
-  admin: 'Администратор',
+  manager: 'Менеджер (доступ снят)',
+  admin: 'Администратор (доступ снят)',
   owner: 'Владелец',
 }
 

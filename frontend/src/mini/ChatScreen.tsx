@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { EmptyState, ErrorState, Spinner } from '../components/ui'
 import type { ChatAnswer, ChatMessage } from '../lib/api'
-import { plainText } from '../lib/format'
+import { neurons, plural, plainText } from '../lib/format'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle } from './parts'
 import { openExternal } from './telegram'
@@ -16,9 +16,11 @@ export function ChatScreen() {
   const [busy, setBusy] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const left = me.usage.has_subscription
-    ? me.usage.generations_left
-    : me.usage.free_generations_left
+  const neuronLimited = me.usage.neurons_limit > 0
+  const left = neuronLimited ? me.usage.neurons_left : me.usage.generations_left
+  const leftLabel = neuronLimited
+    ? neurons(left)
+    : plural(left, ['генерация', 'генерации', 'генераций'])
 
   useEffect(() => {
     if (history.data) setMessages(history.data)
@@ -77,7 +79,7 @@ export function ChatScreen() {
 
   return (
     <div className="space-y-5">
-      <PageHeaderChat left={left} />
+      <PageHeaderChat leftLabel={leftLabel} />
       <section>
         <BlockTitle>Чат-помощник</BlockTitle>
         <div className="card flex flex-col p-4">
@@ -170,7 +172,9 @@ export function ChatScreen() {
         />
         <div className="flex items-center justify-between gap-3">
           <p className="hint">
-            Один запрос списывает 1 генерацию. Доступно: {left}
+            {neuronLimited
+              ? `Расход Neurons зависит от модели. Доступно: ${leftLabel}`
+              : `Один запрос списывает 1 генерацию. Доступно: ${leftLabel}`}
           </p>
           <button
             type="submit"
@@ -185,12 +189,12 @@ export function ChatScreen() {
   )
 }
 
-function PageHeaderChat({ left }: { left: number }) {
+function PageHeaderChat({ leftLabel }: { leftLabel: string }) {
   return (
     <header>
       <h1 className="font-display text-2xl font-semibold text-ink-900">Чат</h1>
       <p className="mt-1 text-sm text-ink-600">
-        Поможет разобраться в теме и найти материалы. Осталось запросов: {left}.
+        Поможет разобраться в теме и найти материалы. Доступно: {leftLabel}.
       </p>
     </header>
   )

@@ -46,7 +46,9 @@ class FakeState:
 
 
 def _answer(text: str) -> SimpleNamespace:
-    return SimpleNamespace(message=SimpleNamespace(content=text))
+    return SimpleNamespace(
+        message=SimpleNamespace(content=text), neurons_left=123.5
+    )
 
 
 def test_plain_converts_service_html_for_telegram() -> None:
@@ -84,7 +86,8 @@ async def test_chat_message_uses_shared_service(
     assert seen["message"] == "Сколько будет 2+2?"
     assert seen["web_search"] is True
     assert message.bot.actions == [(42, ChatAction.TYPING)]
-    assert message.sent[0][0] == "Готово: 2+2 = 4"
+    assert message.sent[0][0].startswith("Готово: 2+2 = 4")
+    assert "Осталось 123.5 Neurons" in message.sent[0][0]
     assert state.value == Chat.message
 
 

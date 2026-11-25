@@ -26,15 +26,23 @@ class UserOut(ORMModel):
     role: str
     referral_code: str
     balance_minor: int
+    generations_bonus: int = 0
+    neurons_bonus: float = 0.0
+    neurons_limit_override: float | None = None
     is_blocked: bool
     onboarding_completed: bool
     created_at: datetime
 
 
 class UserUpdateIn(BaseModel):
-    role: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     is_blocked: bool | None = None
     balance_delta_minor: int | None = None
+    generations_bonus: int | None = Field(default=None, ge=-1_000_000, le=1_000_000)
+    neurons_bonus: float | None = Field(default=None, ge=-1_000_000, le=1_000_000)
+    # null in the payload resets the per-user limit back to the global one.
+    neurons_limit_override: float | None = Field(default=None, ge=1, le=10_000_000)
 
 
 class BrandProfileIn(BaseModel):
@@ -203,6 +211,9 @@ class UsageOut(BaseModel):
     generations_used: int = 0
     generations_left: int = 0
     free_generations_left: int = 0
+    neurons_limit: float = 0.0
+    neurons_used: float = 0.0
+    neurons_left: float = 0.0
     expires_at: datetime | None = None
 
 
@@ -242,6 +253,7 @@ class ChatOut(BaseModel):
     tokens: int = 0
     cost_minor: int = 0
     generations_left: int = 0
+    neurons_left: float = 0.0
     created_at: datetime
 
 

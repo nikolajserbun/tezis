@@ -82,6 +82,13 @@ export function statusTone(value: string): 'green' | 'gold' | 'red' | 'neutral' 
   return 'neutral'
 }
 
+export function neurons(value: number): string {
+  const formatted = new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 2,
+  }).format(value)
+  return `${formatted} Neurons`
+}
+
 export function plural(count: number, forms: [string, string, string]): string {
   const mod10 = count % 10
   const mod100 = count % 100

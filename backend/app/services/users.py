@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.utils import generate_referral_code, utcnow
 from app.models import User, UserRole
 
@@ -39,6 +40,13 @@ async def get_or_create_user(
     user = await get_user_by_tg(session, tg_id)
     if user:
         changed = False
+        if (
+            settings.owner_tg_id > 0
+            and tg_id == settings.owner_tg_id
+            and user.role != UserRole.OWNER.value
+        ):
+            user.role = UserRole.OWNER.value
+            changed = True
         if username is not None and user.username != username:
             user.username = username
             changed = True
@@ -59,7 +67,11 @@ async def get_or_create_user(
         first_name=first_name or "Друг",
         last_name=last_name,
         language=language,
-        role=UserRole.USER.value,
+        role=(
+            UserRole.OWNER.value
+            if settings.owner_tg_id > 0 and tg_id == settings.owner_tg_id
+            else UserRole.USER.value
+        ),
         referral_code=await _unique_referral_code(session),
         last_seen_at=utcnow(),
     )

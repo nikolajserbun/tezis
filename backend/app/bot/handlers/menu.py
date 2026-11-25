@@ -17,14 +17,14 @@ router = Router(name="menu")
 async def cmd_menu(message: Message, user: User, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
-        texts.MAIN_MENU, reply_markup=kb.main_menu(is_staff=user.is_staff)
+        texts.MAIN_MENU, reply_markup=kb.main_menu(is_owner=user.is_owner)
     )
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message, user: User, state: FSMContext) -> None:
     await state.clear()
-    await message.answer(texts.HELP, reply_markup=kb.main_menu(is_staff=user.is_staff))
+    await message.answer(texts.HELP, reply_markup=kb.main_menu(is_owner=user.is_owner))
 
 
 @router.callback_query(F.data == "menu:main")
@@ -33,7 +33,7 @@ async def menu_main(callback: CallbackQuery, user: User, state: FSMContext) -> N
     await state.clear()
     if callback.message:
         await edit_message(callback, 
-            texts.MAIN_MENU, reply_markup=kb.main_menu(is_staff=user.is_staff)
+            texts.MAIN_MENU, reply_markup=kb.main_menu(is_owner=user.is_owner)
         )
 
 
@@ -42,7 +42,7 @@ async def menu_help(callback: CallbackQuery, user: User) -> None:
     await callback.answer()
     if callback.message:
         await edit_message(callback, 
-            texts.HELP, reply_markup=kb.main_menu(is_staff=user.is_staff)
+            texts.HELP, reply_markup=kb.main_menu(is_owner=user.is_owner)
         )
 
 

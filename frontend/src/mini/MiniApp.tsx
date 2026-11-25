@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toast } from '../components/ui'
 import { ApiError, apiRequest, getToken, setToken, useApi } from '../lib/api'
 import type { Me, TokenResponse } from '../lib/api'
-import { plural } from '../lib/format'
+import { neurons, plural } from '../lib/format'
 import { MiniContext } from './context'
 import type { MiniContextValue, MiniRequestOptions } from './context'
 import { HomeScreen } from './HomeScreen'
@@ -250,8 +250,14 @@ export default function MiniApp() {
                   {me.usage.plan_title || 'Бесплатный доступ'}
                 </p>
                 <p className="hint">
-                  Осталось {me.usage.generations_left}{' '}
-                  {plural(me.usage.generations_left, ['генерация', 'генерации', 'генераций'])}
+                  {me.usage.neurons_limit > 0 ? (
+                    <>Осталось {neurons(me.usage.neurons_left)}</>
+                  ) : (
+                    <>
+                      Осталось {me.usage.generations_left}{' '}
+                      {plural(me.usage.generations_left, ['генерация', 'генерации', 'генераций'])}
+                    </>
+                  )}
                 </p>
               </div>
             </div>

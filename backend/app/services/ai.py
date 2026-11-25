@@ -19,6 +19,7 @@ from app.services import llm, referrals, subscriptions
 class AIResult:
     text: str
     tokens: int
+    neurons: float = 0.0
 
 
 class AIProvider:
@@ -303,7 +304,8 @@ class MockProvider(AIProvider):
                 tone=tone,
                 platform_label=platform_label,
             )
-        return AIResult(text=text, tokens=max(120, len(text) // 4))
+        tokens = max(120, len(text) // 4)
+        return AIResult(text=text, tokens=tokens, neurons=llm.estimate_neurons(tokens))
 
 
 class OpenAIProvider(AIProvider):
@@ -327,8 +329,10 @@ class OpenAIProvider(AIProvider):
             instruction=instruction,
             source_text=source_text,
         )
-        text, tokens = await llm.complete(messages, temperature=0.7)
-        return AIResult(text=text, tokens=tokens)
+        completion = await llm.complete_with_usage(messages, temperature=0.7)
+        return AIResult(
+            text=completion.text, tokens=completion.tokens, neurons=completion.neurons
+        )
 
 
 def get_provider() -> AIProvider:
@@ -348,8 +352,20 @@ async def generate(
     instruction: str | None = None,
     source_text: str | None = None,
 ) -> Generation:
-    allowed, sub, _is_free, _used, _limit = await subscriptions.check_limit(session, user)
+    allowed, sub, is_free, _used, _limit, neurons_used, neurons_limit = (
+        await subscriptions.check_limit(session, user)
+    )
     if not allowed:
+        if neurons_limit > 0 and neurons_used >= neurons_limit:
+            raise PaymentError(
+                f"Лимит {neurons_limit:g} Neurons исчерпан. "
+                "Оформите подписку или обратитесь к владельцу."
+            )
+        if is_free:
+            raise PaymentError(
+                f"Лимит {neurons_limit:g} Neurons исчерпан. "
+                "Оформите подписку, чтобы продолжить."
+            )
         raise PaymentError("Лимит генераций исчерпан. Оформите подписку или продлите её.")
 
     try:
@@ -381,6 +397,7 @@ async def generate(
             subscription_id=sub.id if sub else None,
             kind=f"ai:{kind}",
             tokens=result.tokens,
+            neurons=result.neurons,
             cost_minor=cost,
         )
     )

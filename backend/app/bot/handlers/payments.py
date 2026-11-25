@@ -168,5 +168,5 @@ async def pay_cancel(
     await edit_message(
         callback,
         "Заказ отменён. Вы всегда можете собрать новый в магазине.",
-        reply_markup=kb.main_menu(is_staff=user.is_staff),
+        reply_markup=kb.main_menu(is_owner=user.is_owner),
     )

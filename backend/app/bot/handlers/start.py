@@ -38,7 +38,7 @@ async def show_welcome(
     plan = usage.plan_title if usage.has_subscription else "Free"
     await message.answer(
         texts.MAIN_MENU + f"\n\nТариф: <b>{plan}</b>",
-        reply_markup=kb.main_menu(is_staff=user.is_staff),
+        reply_markup=kb.main_menu(is_owner=user.is_owner),
     )
 
 
@@ -100,7 +100,7 @@ async def onboarding_skip(
     if callback.message:
         await edit_message(callback, 
             texts.MAIN_MENU,
-            reply_markup=kb.main_menu(is_staff=user.is_staff),
+            reply_markup=kb.main_menu(is_owner=user.is_owner),
         )
 
 

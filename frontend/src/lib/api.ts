@@ -97,6 +97,9 @@ export interface User {
   role: Role
   referral_code: string
   balance_minor: number
+  generations_bonus: number
+  neurons_bonus: number
+  neurons_limit_override: number | null
   is_blocked: boolean
   onboarding_completed: boolean
   created_at: string
@@ -117,6 +120,9 @@ export interface Usage {
   generations_used: number
   generations_left: number
   free_generations_left: number
+  neurons_limit: number
+  neurons_used: number
+  neurons_left: number
   expires_at: string | null
 }
 
@@ -236,6 +242,7 @@ export interface ChatAnswer {
   tokens: number
   cost_minor: number
   generations_left: number
+  neurons_left: number
   created_at: string
 }
 

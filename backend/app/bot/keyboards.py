@@ -13,7 +13,7 @@ def _https_frontend() -> str:
     return url if url.startswith("https://") else ""
 
 
-def main_menu(*, is_staff: bool = False) -> InlineKeyboardMarkup:
+def main_menu(*, is_owner: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     frontend = _https_frontend()
     if frontend:
@@ -30,7 +30,7 @@ def main_menu(*, is_staff: bool = False) -> InlineKeyboardMarkup:
     builder.button(text="💎 Подписка", callback_data="sub:view")
     builder.button(text="👤 Кабинет", callback_data="profile:view")
     builder.button(text="🆘 Поддержка", callback_data="support:view")
-    if is_staff:
+    if is_owner:
         builder.button(
             text="⚙️ Админ-панель",
             url=f"{settings.frontend_url.rstrip('/')}/admin",

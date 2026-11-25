@@ -33,9 +33,9 @@ async def sub_view(
     else:
         text = (
             "💎 <b>Подписка</b>\n\n"
-            f"Сейчас у вас тариф Free. Осталось бесплатных генераций: "
-            f"<b>{usage.free_generations_left}</b>.\n\n"
-            "Подписка снимает лимит и открывает контент-план, адаптации и историю."
+            f"Сейчас у вас тариф Free. Осталось бесплатных Neurons: "
+            f"<b>{usage.neurons_left:g}</b> из {usage.neurons_limit:g}.\n\n"
+            "Подписка снимает лимит Neurons и открывает контент-план, адаптации и историю."
         )
     if callback.message:
         await edit_message(callback, 
@@ -60,7 +60,7 @@ async def sub_plans(
     lines = [
         "💎 <b>Тарифы «Тезис»</b>",
         "",
-        "Free — 5 генераций, чтобы попробовать.",
+        "Free — 500 Neurons, чтобы попробовать.",
         "Start — 200 ₽/мес · 15 генераций · 1 бренд.",
         "Pro — 499 ₽/мес · 50 генераций · 5 брендов.",
         "Studio — 999 ₽/мес · 120 генераций · 15 брендов.",
@@ -105,8 +105,8 @@ async def cmd_subscription(
     else:
         text = (
             "💎 <b>Подписка</b>\n\n"
-            f"Тариф Free. Осталось бесплатных генераций: "
-            f"<b>{usage.free_generations_left}</b>."
+            f"Тариф Free. Осталось бесплатных Neurons: "
+            f"<b>{usage.neurons_left:g}</b> из {usage.neurons_limit:g}."
         )
     await message.answer(
         text, reply_markup=kb.subscription_menu(has_subscription=usage.has_subscription)

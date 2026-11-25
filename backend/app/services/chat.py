@@ -24,6 +24,7 @@ class ChatAnswer:
     tokens: int
     cost_minor: int
     generations_left: int
+    neurons_left: float = 0.0
 
 
 async def list_history(session: AsyncSession, user_id, limit: int = 50) -> list[ChatMessage]:
@@ -123,7 +124,7 @@ async def _provider_answer(
     history: list[ChatMessage],
     result: websearch.SearchResult | None,
     brand: BrandProfile | None,
-) -> tuple[str, int]:
+) -> tuple[str, int, float]:
     system = (
         "Ты — разговорчивый помощник экосистемы «Тезис». Отвечай по-русски живо и "
         "конкретно, опирайся на найденные источники, не выдумывай факты и цифры. "
@@ -141,7 +142,8 @@ async def _provider_answer(
         {"role": item.role, "content": item.content[:2000]} for item in history
     )
     messages.append({"role": "user", "content": user_prompt})
-    return await llm.complete(messages, temperature=0.6)
+    completion = await llm.complete_with_usage(messages, temperature=0.6)
+    return completion.text, completion.tokens, completion.neurons
 
 
 async def ask(
@@ -152,8 +154,20 @@ async def ask(
     message: str,
     web_search: bool = True,
 ) -> ChatAnswer:
-    allowed, sub, _is_free, _used, _limit = await subscriptions.check_limit(session, user)
+    allowed, sub, is_free, _used, _limit, neurons_used, neurons_limit = (
+        await subscriptions.check_limit(session, user)
+    )
     if not allowed:
+        if neurons_limit > 0 and neurons_used >= neurons_limit:
+            raise PaymentError(
+                f"Лимит {neurons_limit:g} Neurons исчерпан. "
+                "Оформите подписку или обратитесь к владельцу."
+            )
+        if is_free:
+            raise PaymentError(
+                f"Лимит {neurons_limit:g} Neurons исчерпан. "
+                "Оформите подписку, чтобы продолжить."
+            )
         raise PaymentError("Лимит запросов исчерпан. Оформите подписку или продлите её.")
 
     history = (await list_history(session, user.id))[-MAX_HISTORY:]
@@ -173,8 +187,11 @@ async def ask(
 
     use_provider = llm.is_enabled()
     provider_tokens = 0
+    provider_neurons = 0.0
     if use_provider:
-        answer, provider_tokens = await _provider_answer(message, history, result, brand)
+        answer, provider_tokens, provider_neurons = await _provider_answer(
+            message, history, result, brand
+        )
     elif result is not None:
         answer = _local_answer(message, result, brand)
     else:
@@ -186,6 +203,7 @@ async def ask(
         )
 
     tokens = provider_tokens or max(80, len(answer) // 4)
+    neurons = provider_neurons or llm.estimate_neurons(tokens)
     cost = max(tokens, 0) * settings.ai_cost_per_1k_minor // 1000
     assistant_message = ChatMessage(
         user_id=user.id,
@@ -201,6 +219,7 @@ async def ask(
             subscription_id=sub.id if sub else None,
             kind="chat",
             tokens=tokens,
+            neurons=neurons,
             cost_minor=cost,
         )
     )
@@ -221,4 +240,5 @@ async def ask(
         tokens=tokens,
         cost_minor=cost,
         generations_left=left,
+        neurons_left=usage.neurons_left,
     )

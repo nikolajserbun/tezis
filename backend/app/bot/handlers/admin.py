@@ -19,9 +19,9 @@ async def cmd_admin(
     message: Message, user: User, state: FSMContext
 ) -> None:
     await state.clear()
-    if not user.is_staff:
+    if not user.is_owner:
         await message.answer(
-            "Эта команда доступна только команде проекта.\n\n"
+            "Админ-панель доступна только владельцу проекта.\n\n"
             "Если вы владелец — укажите свой Telegram ID в переменной OWNER_TG_ID.",
             reply_markup=kb.back("menu:main"),
         )
@@ -38,7 +38,7 @@ async def cmd_admin(
 @router.callback_query(F.data == "admin:open")
 async def admin_open(callback: CallbackQuery, user: User) -> None:
     await callback.answer()
-    if not user.is_staff:
+    if not user.is_owner:
         await callback.answer("Недостаточно прав", show_alert=True)
         return
     if callback.message:

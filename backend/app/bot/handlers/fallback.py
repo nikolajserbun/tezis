@@ -16,7 +16,7 @@ async def unknown_message(message: Message, user: User) -> None:
     await message.answer(
         "Я не понял сообщение. Выберите действие в меню или напишите /help.\n\n"
         "Если нужна помощь человека — /support.",
-        reply_markup=kb.main_menu(is_staff=user.is_staff),
+        reply_markup=kb.main_menu(is_owner=user.is_owner),
     )
 
 
@@ -24,7 +24,7 @@ async def unknown_message(message: Message, user: User) -> None:
 async def unsupported_message(message: Message, user: User) -> None:
     await message.answer(
         "Пока я работаю с текстом. Опишите задачу текстом или выберите действие в меню.",
-        reply_markup=kb.main_menu(is_staff=user.is_staff),
+        reply_markup=kb.main_menu(is_owner=user.is_owner),
     )
 
 

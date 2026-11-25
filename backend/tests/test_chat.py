@@ -4,9 +4,10 @@ from datetime import timedelta
 
 import pytest
 
+from app.core.config import settings
 from app.core.errors import PaymentError
 from app.core.utils import utcnow
-from app.models import ChatMessage
+from app.models import ChatMessage, UsageEvent
 from app.services import chat, subscriptions
 
 
@@ -21,6 +22,8 @@ async def test_chat_answer_history_and_quota(session, user) -> None:
     assert answer.sources
     assert "Контент-студия" in answer.message.content
     assert answer.generations_left == 4
+    assert answer.neurons_left < settings.free_neurons
+    assert answer.neurons_left > 0
 
     history = await chat.list_history(session, user.id)
     assert [item.role for item in history] == ["user", "assistant"]
@@ -28,14 +31,18 @@ async def test_chat_answer_history_and_quota(session, user) -> None:
 
     usage = await subscriptions.usage(session, user)
     assert usage.free_generations_left == 4
+    assert usage.neurons_used > 0
+    assert usage.neurons_left == pytest.approx(settings.free_neurons - usage.neurons_used)
 
     removed = await chat.clear_history(session, user.id)
     assert removed == 2
     assert await chat.list_history(session, user.id) == []
 
-    # Clearing history must not restore the spent free request.
+    # Clearing history must not restore the spent Neurons.
     usage_after_clear = await subscriptions.usage(session, user)
     assert usage_after_clear.free_generations_left == 4
+    assert usage_after_clear.neurons_used == pytest.approx(usage.neurons_used)
+    assert usage_after_clear.neurons_left == pytest.approx(usage.neurons_left)
 
 
 async def test_chat_without_web_search(session, user) -> None:
@@ -52,20 +59,17 @@ async def test_chat_without_web_search(session, user) -> None:
 
 
 async def test_chat_stops_at_free_quota(session, user) -> None:
-    for index in range(5):
+    session.add(
+        UsageEvent(user_id=user.id, kind="chat", tokens=0, neurons=settings.free_neurons)
+    )
+    await session.commit()
+
+    with pytest.raises(PaymentError, match="Neurons"):
         await chat.ask(
             session,
             user=user,
             brand=None,
-            message=f"Вопрос {index}",
-            web_search=False,
-        )
-    with pytest.raises(PaymentError):
-        await chat.ask(
-            session,
-            user=user,
-            brand=None,
-            message="Шестой вопрос",
+            message="Ещё вопрос",
             web_search=False,
         )
 

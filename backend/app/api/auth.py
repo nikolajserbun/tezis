@@ -116,7 +116,7 @@ async def dev_login(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> TokenOut:
-    if settings.is_prod:
+    if settings.is_prod or settings.owner_tg_id <= 0:
         raise Forbidden("Dev login is disabled in production")
     if not (
         hmac.compare_digest(payload.email, settings.dev_admin_email)

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -114,6 +116,14 @@ class User(Base, TimestampMixin):
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     balance_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    # Per-user limits set by the owner. Bonuses are signed: negative means a cut.
+    generations_bonus: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default=text("0")
+    )
+    neurons_bonus: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False, server_default=text("0")
+    )
+    neurons_limit_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     onboarding_completed: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
@@ -132,12 +142,13 @@ class User(Base, TimestampMixin):
     subscriptions: Mapped[list[Subscription]] = relationship(back_populates="user")
 
     @property
+    def is_owner(self) -> bool:
+        return self.role == UserRole.OWNER.value
+
+    @property
     def is_staff(self) -> bool:
-        return self.role in {
-            UserRole.MANAGER.value,
-            UserRole.ADMIN.value,
-            UserRole.OWNER.value,
-        }
+        """Kept for compatibility: the only admin account is the owner."""
+        return self.is_owner
 
     @property
     def display_name(self) -> str:
@@ -385,6 +396,7 @@ class UsageEvent(Base):
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    neurons: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     cost_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False, index=True

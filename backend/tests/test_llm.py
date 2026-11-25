@@ -109,3 +109,49 @@ async def test_complete_rejects_reasoning_without_answer(
     async with _mock_client(handler) as client:
         with pytest.raises(ServiceUnavailable, match="AI_MAX_TOKENS"):
             await llm.complete([{"role": "user", "content": "Привет"}], client=client)
+
+
+async def test_complete_with_usage_reads_reported_neurons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "ai_api_key", "test-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "Ответ"}}],
+                "usage": {"total_tokens": 100, "neurons": 1.25},
+            },
+        )
+
+    async with _mock_client(handler) as client:
+        result = await llm.complete_with_usage(
+            [{"role": "user", "content": "Привет"}], client=client
+        )
+
+    assert result.tokens == 100
+    assert result.neurons == 1.25
+
+
+async def test_complete_with_usage_estimates_missing_neurons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "ai_api_key", "test-key")
+    monkeypatch.setattr(settings, "ai_neurons_per_1k_tokens", 25.0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "Ответ"}}],
+                "usage": {"total_tokens": 200},
+            },
+        )
+
+    async with _mock_client(handler) as client:
+        result = await llm.complete_with_usage(
+            [{"role": "user", "content": "Привет"}], client=client
+        )
+
+    assert result.neurons == 5.0

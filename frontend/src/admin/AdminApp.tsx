@@ -17,32 +17,28 @@ import AuditSection from './Audit'
 import { ROLE_LABELS, type Config, type SectionId } from './types'
 import { useApi } from '../lib/api'
 
-type Access = 'staff' | 'admin' | 'owner'
-
 interface NavItem {
   id: SectionId
   label: string
-  access: Access
 }
 
 const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Обзор', access: 'staff' },
-  { id: 'users', label: 'Пользователи', access: 'staff' },
-  { id: 'products', label: 'Товары', access: 'staff' },
-  { id: 'orders', label: 'Заказы', access: 'staff' },
-  { id: 'payments', label: 'Платежи', access: 'staff' },
-  { id: 'subscriptions', label: 'Подписки', access: 'staff' },
-  { id: 'broadcasts', label: 'Рассылки', access: 'staff' },
-  { id: 'payouts', label: 'Выплаты', access: 'staff' },
-  { id: 'support', label: 'Поддержка', access: 'staff' },
-  { id: 'settings', label: 'Настройки', access: 'admin' },
-  { id: 'expenses', label: 'Расходы', access: 'admin' },
-  { id: 'audit', label: 'Журнал', access: 'admin' },
+  { id: 'dashboard', label: 'Обзор' },
+  { id: 'users', label: 'Пользователи' },
+  { id: 'products', label: 'Товары' },
+  { id: 'orders', label: 'Заказы' },
+  { id: 'payments', label: 'Платежи' },
+  { id: 'subscriptions', label: 'Подписки' },
+  { id: 'broadcasts', label: 'Рассылки' },
+  { id: 'payouts', label: 'Выплаты' },
+  { id: 'support', label: 'Поддержка' },
+  { id: 'settings', label: 'Настройки' },
+  { id: 'expenses', label: 'Расходы' },
+  { id: 'audit', label: 'Журнал' },
 ]
 
-function hasAccess(role: Role, access: Access): boolean {
-  if (access === 'staff') return ['manager', 'admin', 'owner'].includes(role)
-  if (access === 'admin') return ['admin', 'owner'].includes(role)
+function hasAccess(role: Role): boolean {
+  // Only the account whose Telegram ID is OWNER_TG_ID gets the owner role.
   return role === 'owner'
 }
 
@@ -102,9 +98,9 @@ export default function AdminApp() {
   }
 
   const role: Role = me?.role ?? 'user'
-  const isAdmin = role === 'admin' || role === 'owner'
   const isOwner = role === 'owner'
-  const visibleNav = useMemo(() => NAV.filter((item) => hasAccess(role, item.access)), [role])
+  const isAdmin = isOwner
+  const visibleNav = useMemo(() => (hasAccess(role) ? NAV : []), [role])
 
   useEffect(() => {
     if (!visibleNav.some((item) => item.id === section)) setSection('dashboard')
@@ -147,14 +143,14 @@ export default function AdminApp() {
     )
   }
 
-  if (!hasAccess(role, 'staff')) {
+  if (!hasAccess(role)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-ivory px-4">
         <div className="card max-w-md p-8 text-center">
           <h1 className="font-display text-2xl font-semibold">Недостаточно прав</h1>
           <p className="mt-3 text-sm text-ink-600">
-            У вас роль «{ROLE_LABELS[role] ?? role}». Для входа в панель нужна роль менеджера,
-            администратора или владельца.
+            У вас роль «{ROLE_LABELS[role] ?? role}». Панель доступна только владельцу
+            (Telegram ID указан в OWNER_TG_ID).
           </p>
           <button type="button" className="btn-primary mt-6 w-full" onClick={() => void handleLogout()}>
             Выйти
@@ -167,7 +163,7 @@ export default function AdminApp() {
   function renderSection() {
     switch (section) {
       case 'dashboard': return <DashboardSection />
-      case 'users': return <UsersSection canManage={isAdmin} isOwner={isOwner} />
+      case 'users': return <UsersSection canManage={isAdmin} />
       case 'products': return <ProductsSection canManage={isAdmin} />
       case 'orders': return <OrdersSection canManage={isAdmin} />
       case 'payments': return <PaymentsSection />
