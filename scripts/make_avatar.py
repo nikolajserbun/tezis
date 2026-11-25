@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "assets" / "brand"
 
 SIZE = 512
+DESIGN = 1024
 SCALE = 4
 GRAPHITE = "#16161A"
 BRASS = "#D3B98C"
@@ -32,7 +33,7 @@ def scaled(value: int) -> int:
 
 
 def render_png(path: Path) -> None:
-    canvas_size = SIZE * SCALE
+    canvas_size = DESIGN * SCALE
     image = Image.new("RGB", (canvas_size, canvas_size), GRAPHITE)
     draw = ImageDraw.Draw(image)
 
