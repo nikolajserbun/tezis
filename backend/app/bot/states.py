@@ -12,6 +12,10 @@ class Content(StatesGroup):
     topic = State()
 
 
+class Chat(StatesGroup):
+    message = State()
+
+
 class Support(StatesGroup):
     message = State()
 

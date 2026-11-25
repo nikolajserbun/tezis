@@ -7,6 +7,7 @@ COMMANDS = [
     BotCommand(command="menu", description="Главное меню"),
     BotCommand(command="profile", description="Личный кабинет"),
     BotCommand(command="shop", description="Магазин и тарифы"),
+    BotCommand(command="chat", description="Чат с ИИ"),
     BotCommand(command="subscription", description="Моя подписка"),
     BotCommand(command="balance", description="Баланс и реферальные"),
     BotCommand(command="referral", description="Реферальная программа"),

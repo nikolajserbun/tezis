@@ -22,7 +22,8 @@ async def cmd_menu(message: Message, user: User, state: FSMContext) -> None:
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message, user: User) -> None:
+async def cmd_help(message: Message, user: User, state: FSMContext) -> None:
+    await state.clear()
     await message.answer(texts.HELP, reply_markup=kb.main_menu(is_staff=user.is_staff))
 
 

@@ -52,8 +52,9 @@ class Settings(BaseSettings):
     webhook_base_url: str = ""
 
     # AI
-    ai_provider: str = "mock"  # mock | openai
+    ai_provider: str = "mock"  # mock | openai | cloudflare
     ai_api_key: str = ""
+    cloudflare_account_id: str = ""
     ai_base_url: str = "https://api.openai.com/v1"
     ai_model: str = "gpt-4o-mini"
     ai_max_tokens: int = 1800

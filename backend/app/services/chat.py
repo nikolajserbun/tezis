@@ -4,15 +4,14 @@ import html
 from dataclasses import dataclass
 from datetime import timedelta
 
-import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.errors import PaymentError, ServiceUnavailable
+from app.core.errors import PaymentError
 from app.core.utils import utcnow
 from app.models import BrandProfile, ChatMessage, UsageEvent, User
-from app.services import referrals, subscriptions, websearch
+from app.services import llm, referrals, subscriptions, websearch
 
 MAX_HISTORY = 8
 
@@ -65,7 +64,10 @@ def _brand_line(brand: BrandProfile | None) -> str:
 
 def _source_context(result: websearch.SearchResult) -> str:
     if not result.items:
-        return "Источники не найдены."
+        return (
+            "Источники не найдены — отвечайте по контексту бренда и истории, "
+            "не выдумывайте факты."
+        )
     lines = []
     for index, item in enumerate(result.items, 1):
         line = f"[{index}] {item.title}: {item.snippet}"
@@ -116,19 +118,19 @@ def _local_answer(
     return "\n".join(parts)
 
 
-async def _openai_answer(
+async def _provider_answer(
     question: str,
     history: list[ChatMessage],
-    result: websearch.SearchResult,
+    result: websearch.SearchResult | None,
     brand: BrandProfile | None,
-) -> str:
+) -> tuple[str, int]:
     system = (
         "Ты — разговорчивый помощник экосистемы «Тезис». Отвечай по-русски живо и "
         "конкретно, опирайся на найденные источники, не выдумывай факты и цифры. "
         "Если данных не хватает, честно скажи об этом. Не обещай гарантированный доход. "
         "В конце предложи уточнить вопрос или продолжить тему в Студии."
     )
-    context = _source_context(result)
+    context = _source_context(result or websearch.SearchResult())
     user_prompt = (
         f"Вопрос: {question}\n\n"
         f"Найденные материалы (используй только их):\n{context}\n\n"
@@ -139,24 +141,7 @@ async def _openai_answer(
         {"role": item.role, "content": item.content[:2000]} for item in history
     )
     messages.append({"role": "user", "content": user_prompt})
-    payload = {
-        "model": settings.ai_model,
-        "messages": messages,
-        "temperature": 0.6,
-        "max_tokens": settings.ai_max_tokens,
-    }
-    url = f"{settings.ai_base_url.rstrip('/')}/chat/completions"
-    try:
-        async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(
-                url,
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.ai_api_key}"},
-            )
-            response.raise_for_status()
-        return str(response.json()["choices"][0]["message"]["content"]).strip()
-    except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as exc:
-        raise ServiceUnavailable("AI-провайдер недоступен, попробуйте позже") from exc
+    return await llm.complete(messages, temperature=0.6)
 
 
 async def ask(
@@ -185,10 +170,13 @@ async def ask(
             {"title": item.title, "url": item.url, "snippet": item.snippet}
             for item in result.items
         ]
-        if settings.ai_provider.lower() == "openai" and settings.ai_api_key:
-            answer = await _openai_answer(message, history, result, brand)
-        else:
-            answer = _local_answer(message, result, brand)
+
+    use_provider = llm.is_enabled()
+    provider_tokens = 0
+    if use_provider:
+        answer, provider_tokens = await _provider_answer(message, history, result, brand)
+    elif result is not None:
+        answer = _local_answer(message, result, brand)
     else:
         answer = (
             f"🤖 <b>Ваш вопрос</b>\n{html.escape(message[:300])}\n\n"
@@ -197,7 +185,7 @@ async def ask(
             "Уточните тему или включите поиск, чтобы найти свежие материалы."
         )
 
-    tokens = max(80, len(answer) // 4)
+    tokens = provider_tokens or max(80, len(answer) // 4)
     cost = max(tokens, 0) * settings.ai_cost_per_1k_minor // 1000
     assistant_message = ChatMessage(
         user_id=user.id,

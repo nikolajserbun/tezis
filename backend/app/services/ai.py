@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
-import httpx
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +12,7 @@ from app.core.config import settings
 from app.core.errors import PaymentError, ServiceUnavailable
 from app.core.utils import utcnow
 from app.models import BrandProfile, Generation, UsageEvent, User
-from app.services import referrals, subscriptions
+from app.services import llm, referrals, subscriptions
 
 
 @dataclass
@@ -320,8 +319,6 @@ class OpenAIProvider(AIProvider):
         instruction: str | None = None,
         source_text: str | None = None,
     ) -> AIResult:
-        if not settings.ai_api_key:
-            raise ServiceUnavailable("AI API key is not configured")
         messages = build_messages(
             kind=kind,
             platform=platform,
@@ -330,35 +327,12 @@ class OpenAIProvider(AIProvider):
             instruction=instruction,
             source_text=source_text,
         )
-        url = f"{settings.ai_base_url.rstrip('/')}/chat/completions"
-        payload = {
-            "model": settings.ai_model,
-            "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": settings.ai_max_tokens,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=90) as client:
-                response = await client.post(
-                    url,
-                    json=payload,
-                    headers={"Authorization": f"Bearer {settings.ai_api_key}"},
-                )
-                response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPError as exc:
-            raise ServiceUnavailable("AI provider is temporarily unavailable") from exc
-
-        try:
-            text = data["choices"][0]["message"]["content"].strip()
-            tokens = int(data.get("usage", {}).get("total_tokens", 0))
-        except (KeyError, IndexError, ValueError) as exc:
-            raise ServiceUnavailable("AI provider returned an invalid response") from exc
+        text, tokens = await llm.complete(messages, temperature=0.7)
         return AIResult(text=text, tokens=tokens)
 
 
 def get_provider() -> AIProvider:
-    if settings.ai_provider.lower() == "openai":
+    if settings.ai_provider.lower() in {"openai", "cloudflare"}:
         return OpenAIProvider()
     return MockProvider()
 

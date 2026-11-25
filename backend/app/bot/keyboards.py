@@ -24,6 +24,7 @@ def main_menu(*, is_staff: bool = False) -> InlineKeyboardMarkup:
     else:
         builder.button(text="📱 Mini App", callback_data="mini:setup")
     builder.button(text="✨ Создать контент", callback_data="content:new")
+    builder.button(text="💬 Чат с ИИ", callback_data="chat:new")
     builder.button(text="📁 Мои проекты", callback_data="content:projects")
     builder.button(text="🛍 Магазин", callback_data="shop:page:0")
     builder.button(text="💎 Подписка", callback_data="sub:view")
@@ -41,6 +42,14 @@ def main_menu(*, is_staff: bool = False) -> InlineKeyboardMarkup:
 def back(callback: str = "menu:main", text: str = "← В меню") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=text, callback_data=callback)
+    return builder.as_markup()
+
+
+def chat_mode() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏁 Завершить диалог", callback_data="chat:exit")
+    builder.button(text="← В меню", callback_data="menu:main")
+    builder.adjust(1)
     return builder.as_markup()
 
 

@@ -14,6 +14,9 @@ os.environ.setdefault("DEV_ADMIN_PASSWORD", "test-password-123")
 os.environ.setdefault("AUTO_CREATE_TABLES", "false")
 # Unit tests must not call a real search provider from a local .env.
 os.environ["SEARXNG_URL"] = ""
+# Unit tests must not call a paid AI provider from a local .env.
+os.environ["AI_PROVIDER"] = "mock"
+os.environ["AI_API_KEY"] = ""
 
 import pytest
 import pytest_asyncio

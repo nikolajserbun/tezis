@@ -6,6 +6,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from app.bot.handlers import (
     admin,
     cart,
+    chat,
     content,
     fallback,
     menu,
@@ -43,6 +44,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(profile.router)
     dp.include_router(referral.router)
     dp.include_router(support.router)
+    dp.include_router(chat.router)
     dp.include_router(payments.router)
     dp.include_router(fallback.router)
     return dp
