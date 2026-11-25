@@ -124,14 +124,14 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE: ${VITE_API_BASE:-}
-        VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-tezis_ai_bot}
+        VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-TezisStudioBot}
         VITE_ADMIN_TELEGRAM_LOGIN: ${VITE_ADMIN_TELEGRAM_LOGIN:-}
         VITE_DEV_PAYMENTS: ${VITE_DEV_PAYMENTS:-true}
     restart: unless-stopped
     depends_on:
       - api
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
 
   caddy:
     image: caddy:2-alpine

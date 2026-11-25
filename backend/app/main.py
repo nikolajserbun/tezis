@@ -6,12 +6,14 @@ import sentry_sdk
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
+from app.bot.commands import COMMANDS
 from app.bot.dispatcher import build_dispatcher
 from app.core.config import settings
 from app.core.db import create_all, engine
@@ -63,6 +65,10 @@ async def lifespan(app: FastAPI):
             drop_pending_updates=False,
         )
         logger.info("webhook_set", url=url)
+        try:
+            await bot.set_my_commands(COMMANDS)
+        except TelegramNetworkError as exc:
+            logger.warning("bot_commands_not_set", error=str(exc))
 
     try:
         yield

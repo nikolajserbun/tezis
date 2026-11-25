@@ -1,5 +1,7 @@
 # Развёртывание «Тезиса»
 
+**Версия:** 0.2 · **Дата:** 25.11.2026
+
 ## 0. Что проверено, а что нет
 
 Локально в среде разработки проверено:
@@ -7,7 +9,7 @@
 - `alembic upgrade head` на SQLite и PostgreSQL 16;
 - `python -m scripts.seed --demo`;
 - `ruff check .` и `mypy app` — без ошибок;
-- `pytest -q` — 44 теста пройдено;
+- `pytest -q` — 47 тестов пройдено;
 - Docker Compose: `postgres`, `redis`, `api`, `worker`, `bot` (polling), `frontend`, `searxng`.
 
 Mini App требует **HTTPS**. Для локального демо можно поднять временный Cloudflare quick tunnel:
@@ -19,6 +21,20 @@ docker run -d --name tezis-tunnel --restart unless-stopped \
 ```
 
 Адрес из `docker logs tezis-tunnel` нужно записать в `FRONTEND_URL` (и `CORS_ORIGINS`) в `.env`, затем пересоздать `bot` и `api`. Быстрый туннель непостоянен: после перезапуска адрес меняется. Для продакшена используйте домен и Caddy из профиля `prod`.
+
+### 0.1. Текущий рабочий режим
+
+Сейчас развёрнут демонстрационный стек: `BOT_MODE=polling`, `APP_ENV=dev`, `AI_PROVIDER=mock`, адрес Mini App выдаёт Cloudflare quick tunnel. Это рабочий режим для проверки продукта, но не продакшен: туннель временный, а генерации детерминированные.
+
+После перезапуска `tezis-tunnel` адрес меняется. Синхронизировать `.env` можно одной командой:
+
+```bash
+python scripts/refresh_tunnel.py
+```
+
+Скрипт читает адрес из логов контейнера, обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL` и `CORS_ORIGINS` и печатает команды для пересоздания `api`/`bot` и рестарта `frontend`. Секреты он не трогает и не выводит.
+
+Переход в продакшен отложен до появления домена: без него нельзя получить TLS-сертификат, поставить webhook и вызвать `/setdomain` для Telegram Login Widget. Конфигурация уже подготовлена — см. раздел 2.
 
 Поиск для чата работает через `TAVILY_API_KEY`, `SERPER_API_KEY` или свой `searxng` (`SEARXNG_URL=http://searxng:8080`, контейнер поднимается Compose). Секрет своего SearXNG задаётся переменной `SEARXNG_SECRET` в `.env`; `searxng/settings.yml` использует подстановку окружения. Бесплатного безлимитного ключа у коммерческих провайдеров нет; SearXNG не требует ключа, но не даёт гарантий по доступности и зависит от правил поисковых систем.
 
@@ -74,7 +90,7 @@ npm run dev
 1. VPS с 2+ vCPU, 4+ GB RAM, 20+ GB SSD, публичным IP и открытыми 80/443.
 2. Docker Engine + Docker Compose Plugin.
 3. Домен `tezis.example.com` и A-запись на IP сервера.
-4. Бот у @BotFather: токен, username, команды (они выставляются `app.bot.runner` при polling; при webhook — задайте вручную по списку из `runner.py`).
+4. Бот у @BotFather: токен и username. Список команд выставляется автоматически: `app.bot.runner` при polling, `app.main` при webhook (общий список — `app/bot/commands.py`).
 5. У @userinfobot узнайте свой Telegram ID — это `OWNER_TG_ID`.
 
 ### 2.2 Окружение
@@ -107,11 +123,15 @@ chmod 600 .env
 
 ### 2.3 Первый запуск
 
+Используйте базовый файл вместе с production-оверлеем. Оверлей принудительно выставляет `APP_ENV=prod`, `DEBUG=false`, `AUTO_CREATE_TABLES=false`, `DEV_PAYMENTS_ENABLED=false`, `BOT_MODE=webhook` и отключает кнопки тестовой оплаты в сборке фронтенда — это не зависит от того, что осталось в `.env`.
+
 ```bash
-docker compose --profile prod pull
-docker compose --profile prod build
-docker compose --profile prod up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d
 ```
+
+Проверить итоговую конфигурацию без вывода секретов можно командой `docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod config --quiet`.
 
 Сервисы:
 - `postgres:5432` — только на localhost;
@@ -160,8 +180,8 @@ docker compose logs --tail=100 api worker
 ```bash
 git pull
 cp .env.example .env.new   # только если изменился формат конфигурации; не перезаписывайте рабочий .env
-docker compose --profile prod build
-docker compose --profile prod up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d
 docker compose exec api alembic current
 docker compose exec api alembic upgrade head
 docker compose logs -f --tail=50 api worker
@@ -191,10 +211,10 @@ bash scripts/restore.sh backups/20260101-120000
 
 ## 5. Откат
 
-1. Остановить приложение: `docker compose --profile prod stop api worker bot`.
+1. Остановить приложение: `docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod stop api worker bot`.
 2. Восстановить БД и ассеты из бэкапа.
 3. Откатить код к предыдущему коммиту/тегу и пересобрать образы.
-4. `docker compose --profile prod up -d`.
+4. `docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d`.
 5. Проверить health и webhook.
 
 ## 6. Частые проблемы

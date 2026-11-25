@@ -1,0 +1,30 @@
+# Production overlay. Use together with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d --build
+#
+# The base stack stays suitable for local development. This overlay hardens
+# runtime settings and disables every development-only shortcut. Secrets stay
+# in .env and are never stored here.
+
+services:
+  api:
+    environment:
+      APP_ENV: prod
+      DEBUG: "false"
+      AUTO_CREATE_TABLES: "false"
+      DEV_PAYMENTS_ENABLED: "false"
+      BOT_MODE: webhook
+
+  worker:
+    environment:
+      APP_ENV: prod
+      DEBUG: "false"
+      AUTO_CREATE_TABLES: "false"
+      DEV_PAYMENTS_ENABLED: "false"
+
+  frontend:
+    build:
+      args:
+        VITE_DEV_PAYMENTS: "false"
+
+  caddy:
+    restart: unless-stopped
