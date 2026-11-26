@@ -100,10 +100,8 @@ export function ChatScreen() {
                   className={item.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
                 >
                   <div
-                    className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                      item.role === 'user'
-                        ? 'bg-gold-500 text-white'
-                        : 'bg-ink-50 text-ink-800'
+                    className={`mini-bubble max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      item.role === 'user' ? 'mini-bubble-user' : 'mini-bubble-assistant'
                     }`}
                   >
                     <p className="whitespace-pre-wrap">{plainText(item.content)}</p>
@@ -136,7 +134,15 @@ export function ChatScreen() {
                   </div>
                 </div>
               ))}
-              {busy && <Spinner label="Бот думает…" />}
+              {busy && (
+                <div className="flex justify-start">
+                  <div className="mini-bubble mini-bubble-assistant mini-typing" aria-label="Бот думает">
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                </div>
+              )}
               <div ref={bottomRef} />
             </div>
           )}

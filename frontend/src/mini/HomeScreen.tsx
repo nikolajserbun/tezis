@@ -7,11 +7,15 @@ import { BlockTitle } from './parts'
 function QuickAction({
   title,
   text,
+  icon,
+  index,
   onClick,
   wide = false,
 }: {
   title: string
   text: string
+  icon: string
+  index: number
   onClick: () => void
   wide?: boolean
 }) {
@@ -19,14 +23,18 @@ function QuickAction({
     <button
       type="button"
       onClick={onClick}
-      className={`card group p-4 text-left transition hover:border-gold-300 ${wide ? 'col-span-2' : ''}`}
+      style={{ animationDelay: `${index * 70}ms` }}
+      className={`card mini-reveal group p-4 text-left ${wide ? 'col-span-2' : ''}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="font-display text-lg font-semibold text-ink-900">{title}</span>
-        <span className="text-gold-600 transition group-hover:translate-x-0.5" aria-hidden>
+        <span className="mini-action-icon" aria-hidden>
+          {icon}
+        </span>
+        <span className="text-gold-600 transition-transform group-hover:translate-x-1" aria-hidden>
           →
         </span>
       </div>
+      <span className="mt-3 block font-display text-lg font-semibold text-ink-900">{title}</span>
       <p className="hint mt-1.5">{text}</p>
     </button>
   )
@@ -49,7 +57,7 @@ export function HomeScreen() {
     <div className="space-y-6">
       <PageHeader title={`Здравствуйте, ${firstName}`} subtitle="Ваша студия контента в Telegram." />
 
-      <section className="card overflow-hidden p-5">
+      <section className="card mini-hero overflow-hidden p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="label">Ваш доступ</p>
@@ -65,7 +73,7 @@ export function HomeScreen() {
         </div>
 
         <div className="mt-5 flex items-end justify-between gap-3">
-          <p className="font-display text-3xl font-semibold text-ink-900">
+          <p className="mini-hero-value font-display text-3xl font-semibold text-ink-900">
             {neuronLimited ? neurons(left) : left}
             {!neuronLimited && (
               <span className="ml-2 text-sm font-sans font-normal text-ink-500">{leftLabel}</span>
@@ -76,11 +84,8 @@ export function HomeScreen() {
             {neuronLimited ? neurons(limit) : limit}
           </p>
         </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink-100">
-          <div
-            className="h-full rounded-full bg-gold-400 transition-all"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="mini-progress mt-3 h-2 overflow-hidden rounded-full bg-ink-100">
+          <span style={{ width: `${progress}%` }} />
         </div>
         <p className="hint mt-3">
           {usage.has_subscription && usage.expires_at && !neuronLimited
@@ -92,11 +97,25 @@ export function HomeScreen() {
       <section>
         <BlockTitle>Быстрый старт</BlockTitle>
         <div className="grid grid-cols-2 gap-3">
-          <QuickAction title="Студия" text="Создать пост, план или сценарий" onClick={() => go('studio')} />
-          <QuickAction title="Магазин" text="Подписки и цифровые продукты" onClick={() => go('shop')} />
+          <QuickAction
+            title="Студия"
+            text="Создать пост, план или сценарий"
+            icon="✦"
+            index={0}
+            onClick={() => go('studio')}
+          />
+          <QuickAction
+            title="Магазин"
+            text="Подписки и цифровые продукты"
+            icon="◈"
+            index={1}
+            onClick={() => go('shop')}
+          />
           <QuickAction
             title="Партнёрская программа"
             text="25 ₽ за друга после первого запроса"
+            icon="↗"
+            index={2}
             onClick={() => go('profile', 'referrals')}
             wide
           />

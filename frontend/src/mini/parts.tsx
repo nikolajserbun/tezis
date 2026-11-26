@@ -4,7 +4,7 @@ import { Badge, EmptyState, ErrorState, Modal, Spinner } from '../components/ui'
 import { copyToClipboard, date, money, shortId } from '../lib/format'
 import type { Invoice, Order } from '../lib/api'
 import { useMini, useMiniApi } from './context'
-import { openExternal } from './telegram'
+import { openInvoice } from './telegram'
 import type { Tab } from './types'
 
 export function TabIcon({ tab }: { tab: Tab }) {
@@ -81,7 +81,10 @@ export function BootView({
 }) {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-5 py-10">
-      <p className="font-display text-3xl font-semibold tracking-tight text-ink-900">Тезис</p>
+      <div className="flex items-center gap-3">
+        <span className="mini-brand-dot h-2.5 w-2.5 rounded-full bg-gold-400" aria-hidden />
+        <p className="font-display text-3xl font-semibold tracking-tight text-ink-900">Тезис</p>
+      </div>
       <div className="mt-8">
         {error ? (
           <ErrorState message={error} onRetry={onRetry} />
@@ -144,7 +147,13 @@ export function OrderCard({ order }: { order: Order }) {
     const invoice = await run<Invoice>(`/api/v1/orders/${order.id}/pay/stars`, { method: 'POST' })
     setBusy(false)
     if (!invoice) return
-    const opened = openExternal(invoice.invoice_url)
+    const opened = openInvoice(invoice.invoice_url, (status) => {
+      bumpOrders()
+      refreshMe()
+      if (status === 'paid') notify('Оплата прошла. Обновляем статус…')
+      else if (status === 'cancelled') notify('Оплата отменена')
+      else if (status === 'failed') notify('Оплата не прошла. Попробуйте ещё раз.')
+    })
     notify(opened ? 'Счёт на оплату открыт' : `Ссылка на оплату: ${invoice.invoice_url}`)
     bumpOrders()
   }

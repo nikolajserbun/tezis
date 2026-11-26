@@ -33,7 +33,12 @@ export function LoginScreen({
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-5 py-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold-600">AI-студия эксперта</p>
+      <div className="flex items-center gap-3">
+        <span className="mini-brand-dot h-2.5 w-2.5 rounded-full bg-gold-400" aria-hidden />
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold-600">
+          AI-студия эксперта
+        </p>
+      </div>
       <h1 className="mt-3 font-display text-4xl font-semibold leading-tight tracking-tight text-ink-900">
         Тезис
       </h1>
@@ -41,7 +46,7 @@ export function LoginScreen({
         Войдите, чтобы собрать профиль бренда, создавать тексты и управлять подпиской.
       </p>
 
-      <div className="mt-8 space-y-4">
+      <div className="mini-reveal mt-8 space-y-4" style={{ animationDelay: '80ms' }}>
         {message && <ErrorState message={message} />}
 
         {onTelegramLogin && (

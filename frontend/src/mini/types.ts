@@ -35,9 +35,17 @@ export interface TelegramWebApp {
   setBackgroundColor?: (color: string) => void
   openLink: (url: string, options?: { try_instant_view?: boolean }) => void
   openTelegramLink?: (url: string) => void
+  openInvoice?: (url: string, callback?: (status: string) => void) => void
+  onEvent?: (event: 'invoiceClosed', handler: (data: InvoiceClosed) => void) => void
+  offEvent?: (event: 'invoiceClosed', handler: (data: InvoiceClosed) => void) => void
   BackButton?: TelegramBackButton
   CloseButton?: TelegramCloseButton
   HapticFeedback?: TelegramHapticFeedback
+}
+
+export interface InvoiceClosed {
+  url: string
+  status: 'paid' | 'cancelled' | 'failed' | 'pending' | string
 }
 
 export interface TelegramWebAppWindow extends Window {

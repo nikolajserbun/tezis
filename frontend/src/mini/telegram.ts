@@ -1,4 +1,4 @@
-import type { TelegramWebApp, TelegramWebAppWindow } from './types'
+import type { InvoiceClosed, TelegramWebApp, TelegramWebAppWindow } from './types'
 
 export function getWebApp(): TelegramWebApp | null {
   if (typeof window === 'undefined') return null
@@ -69,6 +69,39 @@ export function bindBackButton(canGoBack: boolean, onBack: () => void): () => vo
     } catch {
       /* Клиент мог закрыться во время перехода */
     }
+  }
+}
+
+export function openInvoice(url: string, onClosed: (status: string) => void): boolean {
+  const webApp = getWebApp()
+  if (!url || !webApp?.openInvoice) return openExternal(url)
+
+  let handled = false
+  const finish = (status: string): void => {
+    if (handled) return
+    handled = true
+    try {
+      webApp.offEvent?.('invoiceClosed', handler)
+    } catch {
+      /* Старые клиенты могут не поддерживать offEvent */
+    }
+    onClosed(status)
+  }
+  const handler = (data: InvoiceClosed): void => {
+    if (!data.url || data.url === url) finish(data.status)
+  }
+
+  try {
+    webApp.onEvent?.('invoiceClosed', handler)
+    webApp.openInvoice(url, (status) => finish(status))
+    return true
+  } catch {
+    try {
+      webApp.offEvent?.('invoiceClosed', handler)
+    } catch {
+      /* Игнорируем ошибку старых клиентов */
+    }
+    return openExternal(url)
   }
 }
 

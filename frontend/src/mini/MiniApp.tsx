@@ -236,16 +236,16 @@ export default function MiniApp() {
 
     content = (
       <MiniContext.Provider value={contextValue}>
-        <div className="min-h-screen bg-ivory">
-          <header className="sticky top-0 z-30 border-b border-ink-100 bg-ivory/90 backdrop-blur">
+        <div className="min-h-screen">
+          <header className="mini-header sticky top-0 z-30 backdrop-blur">
             <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3">
               <div className="flex items-center gap-2.5">
+                <span className="mini-brand-dot h-2 w-2 rounded-full bg-gold-400" aria-hidden />
                 <span className="font-display text-xl font-semibold tracking-tight text-ink-900">
                   Тезис
                 </span>
-                <span className="h-1.5 w-1.5 rounded-full bg-gold-400" aria-hidden />
               </div>
-              <div className="text-right">
+              <div className="mini-plan text-right">
                 <p className="text-xs font-medium text-ink-900">
                   {me.usage.plan_title || 'Бесплатный доступ'}
                 </p>
@@ -267,18 +267,20 @@ export default function MiniApp() {
             className="mx-auto w-full max-w-md px-4 pt-5"
             style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom))' }}
           >
-            {tab === 'home' && <HomeScreen />}
-            {tab === 'studio' && <StudioScreen />}
-            {tab === 'chat' && <ChatScreen />}
-            {tab === 'shop' && <ShopScreen />}
-            {tab === 'orders' && <OrdersScreen />}
-            {tab === 'profile' && (
-              <ProfileScreen focus={focus} onFocusHandled={focusHandled} />
-            )}
+            <div key={tab} className="mini-screen">
+              {tab === 'home' && <HomeScreen />}
+              {tab === 'studio' && <StudioScreen />}
+              {tab === 'chat' && <ChatScreen />}
+              {tab === 'shop' && <ShopScreen />}
+              {tab === 'orders' && <OrdersScreen />}
+              {tab === 'profile' && (
+                <ProfileScreen focus={focus} onFocusHandled={focusHandled} />
+              )}
+            </div>
           </main>
 
           <nav
-            className="safe-bottom fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-md border-t border-ink-100 bg-ivory/95 backdrop-blur"
+            className="mini-nav safe-bottom fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-md backdrop-blur"
             aria-label="Разделы"
           >
             <div className="grid grid-cols-6 gap-1 px-2 pt-2">
@@ -289,8 +291,8 @@ export default function MiniApp() {
                     key={item.tab}
                     type="button"
                     aria-current={active ? 'page' : undefined}
-                    className={`flex flex-col items-center gap-1 rounded-xl py-1.5 text-[10px] font-medium transition ${
-                      active ? 'text-gold-700' : 'text-ink-500 hover:text-ink-800'
+                    className={`mini-tab flex flex-col items-center gap-1 rounded-xl py-1.5 text-[10px] font-medium ${
+                      active ? 'mini-tab-active' : 'text-ink-500 hover:text-ink-800'
                     }`}
                     onClick={() => go(item.tab)}
                   >
@@ -307,11 +309,11 @@ export default function MiniApp() {
   }
 
   return (
-    <>
+    <div className="mini-app">
       {content}
-      <div className="[&>div]:bottom-24">
+      <div className="mini-toast-wrap [&>div]:bottom-24">
         <Toast message={toast} onClose={dismissToast} />
       </div>
-    </>
+    </div>
   )
 }

@@ -239,7 +239,11 @@ export function StudioScreen() {
           </Field>
           <div className="flex items-center justify-between gap-3">
             <p className="hint">Доступно: {leftLabel}</p>
-            <button type="submit" className="btn-gold" disabled={generating || !topic.trim()}>
+            <button
+              type="submit"
+              className={`btn-gold ${generating ? 'mini-loading' : ''}`}
+              disabled={generating || !topic.trim()}
+            >
               {generating ? 'Генерируем…' : 'Создать'}
             </button>
           </div>
@@ -247,7 +251,7 @@ export function StudioScreen() {
       </section>
 
       {result && (
-        <section ref={resultRef}>
+        <section ref={resultRef} className="mini-reveal">
           <BlockTitle>Результат</BlockTitle>
           <div className="card p-5">
             <div className="flex items-start justify-between gap-3">

@@ -4,7 +4,7 @@ import { money, plural } from '../lib/format'
 import type { Invoice, Order, Product } from '../lib/api'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle, OrdersList, StarsPrice } from './parts'
-import { openExternal } from './telegram'
+import { openInvoice } from './telegram'
 
 type CatalogKind = 'all' | 'subscription' | 'digital'
 
@@ -35,7 +35,13 @@ export function ShopScreen() {
     const invoice = await run<Invoice>(`/api/v1/orders/${order.id}/pay/stars`, { method: 'POST' })
     setBusyId(null)
     if (!invoice) return
-    const opened = openExternal(invoice.invoice_url)
+    const opened = openInvoice(invoice.invoice_url, (status) => {
+      bumpOrders()
+      refreshMe()
+      if (status === 'paid') notify('Оплата прошла. Обновляем статус…')
+      else if (status === 'cancelled') notify('Оплата отменена')
+      else if (status === 'failed') notify('Оплата не прошла. Попробуйте ещё раз.')
+    })
     notify(opened ? 'Счёт на оплату открыт' : `Ссылка на оплату: ${invoice.invoice_url}`)
     bumpOrders()
   }
@@ -92,10 +98,14 @@ export function ShopScreen() {
           <EmptyState title="Каталог пуст" text="Заглядите сюда позже." />
         ) : (
           <div className="space-y-4">
-            {catalog.data.map((product) => {
+            {catalog.data.map((product, index) => {
               const busy = busyId === product.id
               return (
-                <article key={product.id} className="card overflow-hidden">
+                <article
+                  key={product.id}
+                  className="card mini-reveal overflow-hidden"
+                  style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
+                >
                   {product.cover_url && (
                     <img
                       src={product.cover_url}
