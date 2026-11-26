@@ -24,15 +24,16 @@ docker run -d --name tezis-tunnel --restart unless-stopped \
 
 ### 0.1. Рабочий режим
 
-Стек переведён в защищённый режим: `APP_ENV=prod`, `BOT_MODE=webhook`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI, адрес Mini App выдаёт Cloudflare quick tunnel. Туннель временный: для постоянной работы нужен домен и профиль `prod` с Caddy.
+Стек работает в защищённом режиме: `APP_ENV=prod`, `BOT_MODE=webhook`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS-адрес даёт **Tailscale Funnel**: `https://heav1l1ngg.taild084f9.ts.net` проксирует запросы на локальный `frontend:5173`. Адрес постоянный, пока включён компьютер и запущен Tailscale; домен `tezis.work.gd` пока не используется.
 
-После перезапуска `tezis-tunnel` адрес меняется. Синхронизировать `.env` можно одной командой:
+Если адрес меняется, синхронизировать `.env` можно одной командой:
 
 ```bash
-python scripts/refresh_tunnel.py
+python scripts/set_public_url.py https://<новый-адрес>.ts.net
+docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate api frontend worker
 ```
 
-Скрипт читает адрес из логов контейнера, обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS` и печатает команды для пересоздания `api`. Секреты он не трогает и не выводит.
+Скрипт обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS`. Секреты он не трогает и не выводит. Funnel поднимается командой `tailscale funnel --bg 5173` (от имени администратора).
 
 Случайные секреты для production можно сгенерировать командой `python scripts/harden_env.py` — она меняет только плейсхолдеры и не выводит значения. Конфигурация проверяется при старте: при `APP_ENV=prod` приложение откажется запускаться с демо-секретами, `DEBUG=true`, тестовой оплатой или не HTTPS-адресами.
 
