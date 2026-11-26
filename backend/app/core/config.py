@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     support_chat_id: int = 0
     community_chat_id: int = 0
     bot_mode: str = "polling"  # polling | webhook
+    allow_prod_polling: bool = False
     webhook_base_url: str = ""
 
     # AI
@@ -119,9 +120,15 @@ class Settings(BaseSettings):
             raise ValueError("DEBUG and DEV_PAYMENTS_ENABLED must be false in production")
         if self.ai_provider == "mock":
             raise ValueError("AI_PROVIDER=mock is not allowed in production")
-        if self.bot_mode != "webhook":
-            raise ValueError("BOT_MODE=webhook is required in production")
-        if not self.webhook_base_url.startswith("https://"):
+        if self.bot_mode not in {"webhook", "polling"}:
+            raise ValueError("BOT_MODE must be webhook or polling")
+        if self.bot_mode == "polling" and not self.allow_prod_polling:
+            raise ValueError(
+                "BOT_MODE=polling in production requires ALLOW_PROD_POLLING=true"
+            )
+        if self.bot_mode == "webhook" and not self.webhook_base_url.startswith(
+            "https://"
+        ):
             raise ValueError("WEBHOOK_BASE_URL must be an HTTPS URL in production")
         if not self.frontend_url.startswith("https://"):
             raise ValueError("FRONTEND_URL must be an HTTPS URL in production")

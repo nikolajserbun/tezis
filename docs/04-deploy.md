@@ -24,7 +24,15 @@ docker run -d --name tezis-tunnel --restart unless-stopped \
 
 ### 0.1. Рабочий режим
 
-Стек работает в защищённом режиме: `APP_ENV=prod`, `BOT_MODE=webhook`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS-адрес даёт **Tailscale Funnel**: `https://heav1l1ngg.taild084f9.ts.net` проксирует запросы на локальный `frontend:5173`. Адрес постоянный, пока включён компьютер и запущен Tailscale; домен `tezis.work.gd` пока не используется.
+Стек работает в защищённом режиме: `APP_ENV=prod`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS-адрес даёт **Tailscale Funnel**: `https://heav1l1ngg.taild084f9.ts.net` проксирует запросы на локальный `frontend:5173`. Адрес постоянный, пока включён компьютер и запущен Tailscale; домен `tezis.work.gd` пока не используется.
+
+Бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: Tailscale Funnel нестабильно доставлял входящие вебхуки Telegram, тогда как `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`.
+
+Пересоздание стека с polling-ботом:
+
+```bash
+docker compose -p tezis --profile polling -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate api bot worker
+```
 
 Если адрес меняется, синхронизировать `.env` можно одной командой:
 

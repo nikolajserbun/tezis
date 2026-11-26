@@ -67,8 +67,16 @@ async def lifespan(app: FastAPI):
         await create_all()
         logger.info("tables_ready", env=settings.app_env)
 
-    if settings.is_prod and settings.bot_mode != "webhook":
-        raise RuntimeError("BOT_MODE=webhook is required in production")
+    if settings.is_prod and settings.bot_mode not in {"webhook", "polling"}:
+        raise RuntimeError("BOT_MODE must be webhook or polling")
+    if (
+        settings.is_prod
+        and settings.bot_mode == "polling"
+        and not settings.allow_prod_polling
+    ):
+        raise RuntimeError(
+            "BOT_MODE=polling in production requires ALLOW_PROD_POLLING=true"
+        )
     if settings.is_prod and settings.bot_mode == "webhook":
         if not settings.webhook_base_url:
             raise RuntimeError("WEBHOOK_BASE_URL is required for production webhook")

@@ -14,6 +14,17 @@ from app.core.db import create_all, engine
 from app.core.logging import configure_logging, get_logger
 
 
+async def _clear_webhook(bot: Bot, logger) -> None:
+    for attempt in range(6):
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+            return
+        except TelegramNetworkError as exc:
+            logger.warning("webhook_delete_retry", attempt=attempt + 1, error=str(exc))
+            await asyncio.sleep(5)
+    logger.error("webhook_delete_failed")
+
+
 async def main() -> None:
     configure_logging()
     logger = get_logger("bot")
@@ -32,6 +43,7 @@ async def main() -> None:
     )
     dp = build_dispatcher()
     try:
+        await _clear_webhook(bot, logger)
         try:
             await bot.set_my_commands(COMMANDS)
         except TelegramNetworkError as exc:
