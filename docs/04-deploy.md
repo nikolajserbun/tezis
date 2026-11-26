@@ -9,7 +9,7 @@
 - `alembic upgrade head` на SQLite и PostgreSQL 16;
 - `python -m scripts.seed --demo`;
 - `ruff check .` и `mypy app` — без ошибок;
-- `pytest -q` — 47 тестов пройдено;
+- `pytest -q` — 76 тестов пройдено;
 - Docker Compose: `postgres`, `redis`, `api`, `worker`, `bot` (polling), `frontend`, `searxng`.
 
 Mini App требует **HTTPS**. Для локального демо можно поднять временный Cloudflare quick tunnel:
@@ -20,11 +20,11 @@ docker run -d --name tezis-tunnel --restart unless-stopped \
   tunnel --no-autoupdate --url http://frontend:80
 ```
 
-Адрес из `docker logs tezis-tunnel` нужно записать в `FRONTEND_URL` (и `CORS_ORIGINS`) в `.env`, затем пересоздать `bot` и `api`. Быстрый туннель непостоянен: после перезапуска адрес меняется. Для продакшена используйте домен и Caddy из профиля `prod`.
+Адрес из `docker logs tezis-tunnel` нужно записать в `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS` в `.env`, затем пересоздать `api`. Быстрый туннель непостоянен: после перезапуска адрес меняется. Для продакшена используйте домен и Caddy из профиля `prod`.
 
-### 0.1. Текущий рабочий режим
+### 0.1. Рабочий режим
 
-Сейчас развёрнут демонстрационный стек: `BOT_MODE=polling`, `APP_ENV=dev`, `AI_PROVIDER=mock`, адрес Mini App выдаёт Cloudflare quick tunnel. Это рабочий режим для проверки продукта, но не продакшен: туннель временный, а генерации детерминированные.
+Стек переведён в защищённый режим: `APP_ENV=prod`, `BOT_MODE=webhook`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI, адрес Mini App выдаёт Cloudflare quick tunnel. Туннель временный: для постоянной работы нужен домен и профиль `prod` с Caddy.
 
 После перезапуска `tezis-tunnel` адрес меняется. Синхронизировать `.env` можно одной командой:
 
@@ -32,9 +32,9 @@ docker run -d --name tezis-tunnel --restart unless-stopped \
 python scripts/refresh_tunnel.py
 ```
 
-Скрипт читает адрес из логов контейнера, обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL` и `CORS_ORIGINS` и печатает команды для пересоздания `api`/`bot` и рестарта `frontend`. Секреты он не трогает и не выводит.
+Скрипт читает адрес из логов контейнера, обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS` и печатает команды для пересоздания `api`. Секреты он не трогает и не выводит.
 
-Переход в продакшен отложен до появления домена: без него нельзя получить TLS-сертификат, поставить webhook и вызвать `/setdomain` для Telegram Login Widget. Конфигурация уже подготовлена — см. раздел 2.
+Случайные секреты для production можно сгенерировать командой `python scripts/harden_env.py` — она меняет только плейсхолдеры и не выводит значения. Конфигурация проверяется при старте: при `APP_ENV=prod` приложение откажется запускаться с демо-секретами, `DEBUG=true`, тестовой оплатой или не HTTPS-адресами.
 
 Поиск для чата работает через `TAVILY_API_KEY`, `SERPER_API_KEY` или свой `searxng` (`SEARXNG_URL=http://searxng:8080`, контейнер поднимается Compose). Секрет своего SearXNG задаётся переменной `SEARXNG_SECRET` в `.env`; `searxng/settings.yml` использует подстановку окружения. Бесплатного безлимитного ключа у коммерческих провайдеров нет; SearXNG не требует ключа, но не даёт гарантий по доступности и зависит от правил поисковых систем.
 
@@ -161,7 +161,7 @@ docker compose --profile polling up -d bot
 curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 ```
 
-Ожидаемый URL: `https://${DOMAIN}/api/v1/webhooks/telegram/${WEBHOOK_SECRET}`.
+Ожидаемый URL: `https://${DOMAIN}/api/v1/webhooks/telegram`. Секрет передаётся заголовком `X-Telegram-Bot-Api-Secret-Token` и не должен попадать ни в URL, ни в логи.
 
 ### 2.5 Проверка после запуска
 

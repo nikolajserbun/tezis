@@ -30,22 +30,24 @@ async def test_create_order_is_idempotent(session, user, product) -> None:
 
 async def test_stars_payment_activates_subscription_once(session, user, product) -> None:
     order = await orders.create_order(session, user, product_id=product.id)
-    paid = await payments.confirm_stars_payment(
+    paid, created = await payments.confirm_stars_payment(
         session,
         order_id=order.id,
         user_tg_id=user.tg_id,
         charge_id="charge-1",
         amount_stars=order.total_stars,
     )
+    assert created is True
     assert paid.status == OrderStatus.PAID.value
 
-    again = await payments.confirm_stars_payment(
+    again, created_again = await payments.confirm_stars_payment(
         session,
         order_id=order.id,
         user_tg_id=user.tg_id,
         charge_id="charge-1",
         amount_stars=order.total_stars,
     )
+    assert created_again is False
     assert again.id == order.id
 
     payment_count = await session.scalar(select(func.count(Payment.id)))
@@ -67,6 +69,19 @@ async def test_stars_payment_rejects_wrong_amount(session, user, product) -> Non
             user_tg_id=user.tg_id,
             charge_id="charge-bad",
             amount_stars=order.total_stars + 10,
+        )
+
+
+async def test_stars_payment_rejects_non_stars_currency(session, user, product) -> None:
+    order = await orders.create_order(session, user, product_id=product.id)
+    with pytest.raises(ValidationError):
+        await payments.confirm_stars_payment(
+            session,
+            order_id=order.id,
+            user_tg_id=user.tg_id,
+            charge_id="charge-currency",
+            amount_stars=order.total_stars,
+            currency="RUB",
         )
 
 

@@ -55,7 +55,11 @@ async def get_order(
     return OrderOut.model_validate(order)
 
 
-@router.post("/{order_id}/pay/stars", response_model=InvoiceOut)
+@router.post(
+    "/{order_id}/pay/stars",
+    response_model=InvoiceOut,
+    dependencies=[Depends(rate_limit("order-pay", 12, 60))],
+)
 async def pay_stars(
     order_id: UUID,
     request: Request,
@@ -65,6 +69,8 @@ async def pay_stars(
     order = await orders.get_order(session, order_id, user.id)
     if order.status != OrderStatus.PENDING.value:
         raise PaymentError("Заказ уже оплачен или отменён")
+    if order.total_stars <= 0:
+        raise PaymentError("Счёт недоступен. Обратитесь в поддержку.")
     bot = request.app.state.bot
     if bot is None:
         raise ServiceUnavailable("Bot token is not configured")

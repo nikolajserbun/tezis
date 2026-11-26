@@ -5,10 +5,13 @@ from pathlib import Path
 
 TEST_DB = Path(__file__).resolve().parent / "test_tezis.db"
 
-os.environ.setdefault("APP_ENV", "dev")
+os.environ["APP_ENV"] = "dev"
+os.environ["DEV_PAYMENTS_ENABLED"] = "true"
+os.environ["BOT_MODE"] = "polling"
 os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{TEST_DB.as_posix()}")
 os.environ.setdefault("BOT_TOKEN", "123456:TEST-TOKEN")
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-key-with-32-bytes-min")
+os.environ["WEBHOOK_SECRET"] = "test-webhook-secret-with-32-bytes-min"
 os.environ.setdefault("DEV_ADMIN_EMAIL", "owner@test.local")
 os.environ.setdefault("DEV_ADMIN_PASSWORD", "test-password-123")
 os.environ.setdefault("AUTO_CREATE_TABLES", "false")

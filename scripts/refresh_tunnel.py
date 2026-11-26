@@ -5,9 +5,8 @@ Usage:
 
 Quick tunnels get a new address every time the container restarts. This script
 reads the address from the running container and rewrites only FRONTEND_URL,
-PUBLIC_BASE_URL and CORS_ORIGINS in .env. It never prints or rewrites secrets.
-After running it, recreate api/bot and restart frontend with the printed
-commands.
+PUBLIC_BASE_URL, WEBHOOK_BASE_URL and CORS_ORIGINS in .env. It never prints or
+rewrites secrets. After running it, recreate the API with the printed commands.
 """
 
 from __future__ import annotations
@@ -45,6 +44,7 @@ def rewrite_env(url: str) -> None:
     replacements = {
         "FRONTEND_URL": url,
         "PUBLIC_BASE_URL": url,
+        "WEBHOOK_BASE_URL": url,
         "CORS_ORIGINS": f"http://localhost:5173,http://localhost:8000,{url}",
     }
     lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
@@ -79,8 +79,14 @@ def main() -> None:
     print(f"Адрес туннеля записан в .env: {url}")
     print("Выполните в PowerShell в корне проекта:")
     print("$env:COMPOSE_PROJECT_NAME='tezis'")
-    print("docker compose --profile polling up -d --force-recreate api bot")
-    print("docker compose --profile polling restart frontend")
+    print(
+        "docker compose -f docker-compose.yml -f docker-compose.prod.yml "
+        "up -d --force-recreate api"
+    )
+    print(
+        "docker compose -f docker-compose.yml -f docker-compose.prod.yml "
+        "restart frontend worker"
+    )
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { apiRequest, type TokenResponse } from '../lib/api'
 import { Field, Spinner } from '../components/ui'
 import type { Config, TelegramLoginPayload } from './types'
+import type { TelegramWebAppWindow } from '../mini/types'
 
 export default function Login({
   config,
@@ -21,6 +22,36 @@ export default function Login({
   useEffect(() => {
     onLoginRef.current = onLogin
   }, [onLogin])
+
+  useEffect(() => {
+    const initData = (window as TelegramWebAppWindow).Telegram?.WebApp?.initData?.trim()
+    if (!initData) return
+    let disposed = false
+    setBusy(true)
+    void (async () => {
+      try {
+        const result = await apiRequest<TokenResponse>('/api/v1/auth/miniapp', {
+          method: 'POST',
+          body: { init_data: initData },
+        })
+        if (disposed) return
+        if (result.user.role !== 'owner') {
+          setError('Доступ к админ-панели есть только у владельца.')
+          return
+        }
+        await onLoginRef.current(result.access_token)
+      } catch (err) {
+        if (!disposed) {
+          setError(err instanceof Error ? err.message : 'Не удалось войти через Telegram')
+        }
+      } finally {
+        if (!disposed) setBusy(false)
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!bot) return

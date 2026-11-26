@@ -30,10 +30,10 @@ def main_menu(*, is_owner: bool = False) -> InlineKeyboardMarkup:
     builder.button(text="💎 Подписка", callback_data="sub:view")
     builder.button(text="👤 Кабинет", callback_data="profile:view")
     builder.button(text="🆘 Поддержка", callback_data="support:view")
-    if is_owner:
+    if is_owner and frontend:
         builder.button(
             text="⚙️ Админ-панель",
-            url=f"{settings.frontend_url.rstrip('/')}/admin",
+            web_app=WebAppInfo(url=f"{frontend}/admin"),
         )
     builder.adjust(2)
     return builder.as_markup()

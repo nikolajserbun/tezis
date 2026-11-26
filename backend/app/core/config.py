@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -88,6 +91,43 @@ class Settings(BaseSettings):
         if not path.is_absolute():
             path = Path(__file__).resolve().parents[2] / path
         return path
+
+    @model_validator(mode="after")
+    def validate_production(self) -> Settings:
+        if not self.is_prod:
+            return self
+        placeholder_prefixes = (
+            "change-me",
+            "replace-with",
+            "test-password",
+            "tezis-dev-2026",
+        )
+        secrets = {
+            "SECRET_KEY": self.secret_key,
+            "JWT_SECRET": self.jwt_secret,
+            "WEBHOOK_SECRET": self.webhook_secret,
+            "DEV_ADMIN_PASSWORD": self.dev_admin_password,
+        }
+        for name, value in secrets.items():
+            if not value or value.startswith(placeholder_prefixes):
+                raise ValueError(f"{name} must be replaced in production")
+        if not self.bot_token:
+            raise ValueError("BOT_TOKEN is required in production")
+        if self.owner_tg_id <= 0:
+            raise ValueError("OWNER_TG_ID must be a real Telegram ID in production")
+        if self.debug or self.dev_payments_enabled:
+            raise ValueError("DEBUG and DEV_PAYMENTS_ENABLED must be false in production")
+        if self.ai_provider == "mock":
+            raise ValueError("AI_PROVIDER=mock is not allowed in production")
+        if self.bot_mode != "webhook":
+            raise ValueError("BOT_MODE=webhook is required in production")
+        if not self.webhook_base_url.startswith("https://"):
+            raise ValueError("WEBHOOK_BASE_URL must be an HTTPS URL in production")
+        if not self.frontend_url.startswith("https://"):
+            raise ValueError("FRONTEND_URL must be an HTTPS URL in production")
+        if not self.public_base_url.startswith("https://"):
+            raise ValueError("PUBLIC_BASE_URL must be an HTTPS URL in production")
+        return self
 
 
 @lru_cache

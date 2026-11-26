@@ -4,6 +4,7 @@ import uuid
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Forbidden, PaymentError, ValidationError
@@ -59,23 +60,34 @@ async def confirm_stars_payment(
     user_tg_id: int,
     charge_id: str,
     amount_stars: int,
-) -> Order:
+    currency: str = "XTR",
+) -> tuple[Order, bool]:
+    """Confirm a Telegram Stars payment.
+
+    Returns the order and ``created`` flag. The flag is false for duplicate or
+    concurrent webhook deliveries so callers do not send the same receipt twice.
+    """
+    if currency != "XTR":
+        raise ValidationError("Оплата принимается только в Telegram Stars")
+    if amount_stars <= 0:
+        raise PaymentError("Некорректная сумма платежа")
+
     order = await orders.get_order(session, order_id)
     if order.user.tg_id != user_tg_id:
         raise Forbidden("Заказ принадлежит другому пользователю")
 
+    existing = await get_payment_by_charge(session, charge_id)
+    if existing is not None:
+        if existing.order_id != order.id or existing.status != PaymentStatus.SUCCEEDED.value:
+            raise PaymentError("Этот платёж уже используется другим заказом")
+        return await orders.get_order(session, order.id), False
+
     if order.status in {OrderStatus.PAID.value, OrderStatus.FULFILLED.value}:
-        return order
+        return order, False
     if order.status != OrderStatus.PENDING.value:
         raise PaymentError("Заказ нельзя оплатить в текущем статусе")
     if amount_stars != order.total_stars:
         raise PaymentError("Сумма платежа не совпадает с заказом")
-
-    existing = await session.scalar(
-        select(Payment).where(Payment.telegram_charge_id == charge_id)
-    )
-    if existing is not None:
-        return order
 
     payment = Payment(
         order_id=order.id,
@@ -85,14 +97,28 @@ async def confirm_stars_payment(
         telegram_charge_id=charge_id,
         amount_minor=order.total_minor,
         amount_stars=amount_stars,
-        currency=order.currency,
+        currency="XTR",
         status=PaymentStatus.SUCCEEDED.value,
-        payload={"charge_id": charge_id},
+        payload={
+            "charge_id": charge_id,
+            "rub_equivalent_minor": order.total_minor,
+        },
     )
     session.add(payment)
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Two webhooks can arrive at the same time. The unique charge ID lets
+        # the loser recognize the winner instead of returning HTTP 500.
+        await session.rollback()
+        existing = await get_payment_by_charge(session, charge_id)
+        if existing is not None and existing.order_id == order.id:
+            return await orders.get_order(session, order.id), False
+        raise PaymentError("Не удалось подтвердить платёж, попробуйте позже") from exc
+
     await _activate_order(session, order)
     await session.commit()
-    return await orders.get_order(session, order.id)
+    return await orders.get_order(session, order.id), True
 
 
 async def confirm_manual_payment(

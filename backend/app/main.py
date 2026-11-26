@@ -33,6 +33,17 @@ async def lifespan(app: FastAPI):
         await create_all()
         logger.info("tables_ready", env=settings.app_env)
 
+    if settings.is_prod and settings.bot_mode != "webhook":
+        raise RuntimeError("BOT_MODE=webhook is required in production")
+    if settings.is_prod and settings.bot_mode == "webhook":
+        if not settings.webhook_base_url:
+            raise RuntimeError("WEBHOOK_BASE_URL is required for production webhook")
+        if (
+            not settings.webhook_secret
+            or settings.webhook_secret.startswith("change-me")
+        ):
+            raise RuntimeError("WEBHOOK_SECRET must be replaced in production")
+
     bot: Bot | None = None
     dp = None
     if settings.bot_token:
@@ -56,7 +67,7 @@ async def lifespan(app: FastAPI):
     ):
         url = (
             f"{settings.webhook_base_url.rstrip('/')}"
-            f"/api/v1/webhooks/telegram/{settings.webhook_secret}"
+            "/api/v1/webhooks/telegram"
         )
         await bot.set_webhook(
             url,

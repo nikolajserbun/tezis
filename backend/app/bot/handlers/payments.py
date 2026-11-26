@@ -24,6 +24,12 @@ async def pre_checkout(
     try:
         order_id = payments.parse_invoice_payload(query.invoice_payload)
         order = await orders.get_order(session, order_id, user.id)
+        if query.currency != "XTR":
+            await query.answer(ok=False, error_message="Поддерживаются только Telegram Stars.")
+            return
+        if order.total_stars <= 0:
+            await query.answer(ok=False, error_message="Счёт недоступен. Обратитесь в поддержку.")
+            return
         if order.total_stars != query.total_amount:
             await query.answer(
                 ok=False, error_message="Сумма изменилась. Откройте заказ заново."
@@ -47,12 +53,13 @@ async def successful_payment(
         return
     try:
         order_id = payments.parse_invoice_payload(payment.invoice_payload)
-        order = await payments.confirm_stars_payment(
+        order, created = await payments.confirm_stars_payment(
             session,
             order_id=order_id,
             user_tg_id=user.tg_id,
             charge_id=payment.telegram_payment_charge_id,
             amount_stars=payment.total_amount,
+            currency=payment.currency,
         )
     except (AppError, ValueError) as exc:
         await message.answer(
@@ -68,6 +75,10 @@ async def successful_payment(
             f"Сумма: {payment.total_amount} ⭐\n"
             f"Ошибка: {getattr(exc, 'message', str(exc))}",
         )
+        return
+
+    if not created:
+        await message.answer("Этот платёж уже был обработан. " + texts.order_card(order))
         return
 
     await message.answer(
@@ -99,6 +110,8 @@ async def pay_stars(
         order = await orders.get_order(session, callback_part(callback, 2), user.id)
         if order.status != OrderStatus.PENDING.value:
             raise PaymentError("Заказ уже обработан")
+        if order.total_stars <= 0:
+            raise PaymentError("Счёт недоступен. Обратитесь в поддержку.")
         label = (
             order.items[0].title
             if len(order.items) == 1

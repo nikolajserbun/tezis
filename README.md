@@ -176,7 +176,7 @@ cd frontend
 npm.cmd run build
 ```
 
-Результат последней проверки в этом проекте: `ruff` — чисто, `mypy` — 0 ошибок, `pytest` — 35 passed, `npm run build` — успешно. Дополнительно выполнен smoke-test в браузере: вход в админку, переключение разделов, вход в Mini App и переключение всех пяти экранов без ошибок консоли.
+Результат последней проверки в этом проекте: `ruff` — чисто, `mypy` — 0 ошибок, `pytest` — 71 passed, `npm run build` — успешно. Дополнительно выполнен smoke-test в браузере: вход в админку, переключение разделов, вход в Mini App и переключение всех экранов без ошибок консоли.
 
 ---
 
@@ -186,13 +186,21 @@ npm.cmd run build
 
 ```bash
 cp .env.example .env
-# заполнить секреты, домен, BOT_MODE=webhook
-docker compose --profile prod up -d --build
+# заполнить секреты, HTTPS-адрес и OWNER_TG_ID; APP_ENV=prod, BOT_MODE=webhook
+python scripts/harden_env.py
+
+# С постоянным доменом и Caddy:
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d --build
+
+# Или с уже работающим HTTPS-туннелем (без Caddy):
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+
+Важно: профиль `prod` сам по себе только включает Caddy. Без `docker-compose.prod.yml` стек остаётся в dev-режиме с тестовой оплатой и локальным входом.
 
 Подробности — в [docs/04-deploy.md](docs/04-deploy.md).
 
-> Docker в среде, где собирался проект, недоступен, поэтому контейнеры не запускались. Перед боевым использованием выполните чек-лист из deploy-документа на сервере.
+> Docker Compose проверен локально: сервисы `postgres`, `redis`, `api`, `bot`, `worker`, `frontend` и `searxng` поднимаются и проходят health-check. Перед боевым использованием выполните чек-лист из deploy-документа на сервере и заполните свои секреты в `.env`.
 
 ---
 
@@ -219,4 +227,4 @@ docker compose --profile prod up -d --build
 - Нет автоматической публикации в соцсети, white-label и многоязычности.
 - Выплаты обрабатываются вручную.
 - YooKassa не активна; доступны Stars и тестовая оплата для разработки.
-- Реальный Telegram-токен, ID владельца, домен и ключ AI не заданы — их нужно заполнить в `.env`.
+- Реальный Telegram-токен, ID владельца, домен и ключ AI задаются только в локальном `.env`; образец [`.env.example`](.env.example) содержит пустые значения и комментарии.
