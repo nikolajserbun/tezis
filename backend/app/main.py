@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from typing import Any
 
 import sentry_sdk
-from aiogram import Bot
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
@@ -20,6 +22,38 @@ from app.core.db import create_all, engine
 from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger
 from app.core.security import SecurityError
+
+WEBHOOK_RETRY_DELAYS = (5, 10, 20, 40, 60, 60)
+
+
+async def _set_webhook_and_commands(
+    bot: Bot, dp: Dispatcher, url: str, logger: Any
+) -> None:
+    await bot.set_webhook(
+        url,
+        allowed_updates=dp.resolve_used_update_types(),
+        secret_token=settings.webhook_secret,
+        drop_pending_updates=False,
+    )
+    logger.info("webhook_set", url=url)
+    try:
+        await bot.set_my_commands(COMMANDS)
+    except TelegramNetworkError as exc:
+        logger.warning("bot_commands_not_set", error=str(exc))
+
+
+async def _retry_webhook_setup(
+    bot: Bot, dp: Dispatcher, url: str, logger: Any
+) -> None:
+    for delay in WEBHOOK_RETRY_DELAYS:
+        await asyncio.sleep(delay)
+        try:
+            await _set_webhook_and_commands(bot, dp, url, logger)
+            logger.info("webhook_setup_recovered")
+            return
+        except TelegramNetworkError as exc:
+            logger.warning("webhook_setup_retry", delay=delay, error=str(exc))
+    logger.error("webhook_setup_failed", url=url)
 
 
 @asynccontextmanager
@@ -46,6 +80,7 @@ async def lifespan(app: FastAPI):
 
     bot: Bot | None = None
     dp = None
+    webhook_task: asyncio.Task[None] | None = None
     if settings.bot_token:
         bot = Bot(
             token=settings.bot_token,
@@ -69,21 +104,21 @@ async def lifespan(app: FastAPI):
             f"{settings.webhook_base_url.rstrip('/')}"
             "/api/v1/webhooks/telegram"
         )
-        await bot.set_webhook(
-            url,
-            allowed_updates=dp.resolve_used_update_types(),
-            secret_token=settings.webhook_secret,
-            drop_pending_updates=False,
-        )
-        logger.info("webhook_set", url=url)
         try:
-            await bot.set_my_commands(COMMANDS)
+            await _set_webhook_and_commands(bot, dp, url, logger)
         except TelegramNetworkError as exc:
-            logger.warning("bot_commands_not_set", error=str(exc))
+            logger.warning("webhook_setup_deferred", url=url, error=str(exc))
+            webhook_task = asyncio.create_task(
+                _retry_webhook_setup(bot, dp, url, logger)
+            )
 
     try:
         yield
     finally:
+        if webhook_task is not None:
+            webhook_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await webhook_task
         if bot is not None:
             await bot.session.close()
         await engine.dispose()

@@ -70,9 +70,8 @@ services:
         condition: service_healthy
       searxng:
         condition: service_started
-    # WSL2 DNS can resolve api.telegram.org to an address unreachable from containers.
-    extra_hosts:
-      - "api.telegram.org:149.154.167.220"
+    # Use normal DNS for api.telegram.org. A previously pinned Telegram IP became
+    # unreachable and prevented the bot from replying to webhook updates.
     volumes:
       - ./backend/assets:/app/assets:ro
       - ./backups:/app/backups
@@ -94,8 +93,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    extra_hosts:
-      - "api.telegram.org:149.154.167.220"
     volumes:
       - ./backend/assets:/app/assets:ro
 
@@ -114,8 +111,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    extra_hosts:
-      - "api.telegram.org:149.154.167.220"
     volumes:
       - ./backend/assets:/app/assets:ro
 
