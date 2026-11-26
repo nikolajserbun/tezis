@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from hmac import compare_digest
 
+from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from fastapi import APIRouter, Header, Request
 
@@ -21,6 +23,25 @@ def _secret_is_valid(candidate: str | None) -> bool:
     return candidate is not None and compare_digest(candidate, expected)
 
 
+async def _process_update(bot: Bot, dp: Dispatcher, update: Update) -> None:
+    try:
+        await dp.feed_update(bot, update)
+    except Exception as exc:
+        # Telegram retries non-2xx responses. Report the failure to the
+        # owner and keep it in logs/Sentry; the webhook already returned 200
+        # so a transient handler error does not cause a retry storm.
+        logger.exception("webhook_processing_failed", error=str(exc))
+        try:
+            await notifications.notify_admins(
+                bot,
+                "❗️ <b>Ошибка обработки webhook Telegram</b>\n\n"
+                f"Тип: <code>{type(exc).__name__}</code>\n"
+                "Проверьте логи API и статус заказа вручную.",
+            )
+        except Exception as notify_exc:
+            logger.exception("webhook_alert_failed", error=str(notify_exc))
+
+
 @router.post("/telegram")
 @router.post("/telegram/{secret}")
 async def telegram_webhook(
@@ -33,6 +54,9 @@ async def telegram_webhook(
     The legacy path secret is still accepted for older installations, but new
     webhooks are registered with the secret only in the
     ``X-Telegram-Bot-Api-Secret-Token`` header.
+
+    The update is processed in the background. Telegram expects a fast 200,
+    while sending a reply can take tens of seconds on a slow connection.
     """
     candidate = x_telegram_bot_api_secret_token or secret
     if not _secret_is_valid(candidate):
@@ -46,20 +70,11 @@ async def telegram_webhook(
     try:
         payload = await request.json()
         update = Update.model_validate(payload)
-        await dp.feed_update(bot, update)
     except Exception as exc:
-        # Telegram retries any non-2xx response. Report the failure to the
-        # owner and return 200 so a transient handler error does not cause a
-        # retry storm; the error is available in logs/Sentry for recovery.
         logger.exception("webhook_processing_failed", error=str(exc))
-        try:
-            await notifications.notify_admins(
-                bot,
-                "❗️ <b>Ошибка обработки webhook Telegram</b>\n\n"
-                f"Тип: <code>{type(exc).__name__}</code>\n"
-                "Проверьте логи API и статус заказа вручную.",
-            )
-        except Exception as notify_exc:
-            logger.exception("webhook_alert_failed", error=str(notify_exc))
+        return {"ok": True}
 
+    task = asyncio.create_task(_process_update(bot, dp, update))
+    request.app.state.webhook_tasks.add(task)
+    task.add_done_callback(request.app.state.webhook_tasks.discard)
     return {"ok": True}

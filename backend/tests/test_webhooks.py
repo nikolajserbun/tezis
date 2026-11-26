@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.core.config import settings
@@ -28,6 +29,22 @@ class StubDispatcher:
         self.updates.append(update)
 
 
+class BlockingDispatcher:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def feed_update(self, bot: object, update: object) -> None:
+        self.started.set()
+        await self.release.wait()
+
+
+async def _drain_webhook_tasks() -> None:
+    tasks = tuple(app.state.webhook_tasks)
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
 async def test_webhook_accepts_secret_header(client) -> None:
     dp = StubDispatcher()
     app.state.dp = dp
@@ -38,6 +55,7 @@ async def test_webhook_accepts_secret_header(client) -> None:
         json=UPDATE,
         headers={"X-Telegram-Bot-Api-Secret-Token": settings.webhook_secret},
     )
+    await _drain_webhook_tasks()
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
@@ -53,6 +71,7 @@ async def test_webhook_accepts_legacy_path_secret(client) -> None:
         f"/api/v1/webhooks/telegram/{settings.webhook_secret}",
         json=UPDATE,
     )
+    await _drain_webhook_tasks()
 
     assert response.status_code == 200
     assert len(dp.updates) == 1
@@ -68,6 +87,7 @@ async def test_webhook_rejects_invalid_secret(client) -> None:
         json=UPDATE,
         headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"},
     )
+    await _drain_webhook_tasks()
 
     assert response.status_code == 403
     assert dp.updates == []
@@ -82,7 +102,27 @@ async def test_webhook_returns_ok_when_handler_fails(client) -> None:
         json=UPDATE,
         headers={"X-Telegram-Bot-Api-Secret-Token": settings.webhook_secret},
     )
+    await _drain_webhook_tasks()
 
     # Telegram retries non-2xx responses; a handler error must not cause a storm.
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+async def test_webhook_acks_before_handler_finishes(client) -> None:
+    dp = BlockingDispatcher()
+    app.state.dp = dp
+    app.state.bot = object()
+
+    try:
+        response = await client.post(
+            "/api/v1/webhooks/telegram",
+            json=UPDATE,
+            headers={"X-Telegram-Bot-Api-Secret-Token": settings.webhook_secret},
+        )
+        await asyncio.wait_for(dp.started.wait(), timeout=2)
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+    finally:
+        dp.release.set()
+        await _drain_webhook_tasks()

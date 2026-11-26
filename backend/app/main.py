@@ -119,6 +119,11 @@ async def lifespan(app: FastAPI):
             webhook_task.cancel()
             with suppress(asyncio.CancelledError):
                 await webhook_task
+        pending = tuple(app.state.webhook_tasks)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         if bot is not None:
             await bot.session.close()
         await engine.dispose()
@@ -134,6 +139,8 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+app.state.webhook_tasks = set()
 
 app.add_middleware(
     CORSMiddleware,
