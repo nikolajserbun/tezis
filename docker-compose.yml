@@ -128,6 +128,26 @@ services:
     ports:
       - "127.0.0.1:5173:80"
 
+  tunnel:
+    # Named Cloudflare Tunnel, enabled with --profile tunnel.
+    # Put the token from Cloudflare Zero Trust into .env as TUNNEL_TOKEN.
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$TUNNEL_TOKEN" ]; then
+          echo "TUNNEL_TOKEN is required for the tunnel profile"
+          exit 1
+        fi
+        exec cloudflared tunnel --no-autoupdate run --token "$TUNNEL_TOKEN"
+    depends_on:
+      - frontend
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

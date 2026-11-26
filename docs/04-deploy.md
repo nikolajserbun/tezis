@@ -1,6 +1,6 @@
 # Развёртывание «Тезиса»
 
-**Версия:** 0.2 · **Дата:** 25.11.2026
+**Версия:** 0.3 · **Дата:** 26.11.2026
 
 ## 0. Что проверено, а что нет
 
@@ -12,21 +12,42 @@
 - `pytest -q` — 76 тестов пройдено;
 - Docker Compose: `postgres`, `redis`, `api`, `worker`, `bot` (polling), `frontend`, `searxng`.
 
-Mini App требует **HTTPS**. Для локального демо можно поднять временный Cloudflare quick tunnel:
-
-```bash
-docker run -d --name tezis-tunnel --restart unless-stopped \
-  --network tezis_default cloudflare/cloudflared:latest \
-  tunnel --no-autoupdate --url http://frontend:80
-```
-
-Адрес из `docker logs tezis-tunnel` нужно записать в `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS` в `.env`, затем пересоздать `api`. Быстрый туннель непостоянен: после перезапуска адрес меняется. Для продакшена используйте домен и Caddy из профиля `prod`.
+Mini App требует **HTTPS**. Сейчас публичный адрес даёт временный Cloudflare quick tunnel (`*.trycloudflare.com`), поднятый контейнером `tezis-cf-tunnel`. Он работает, но адрес меняется при каждом перезапуске контейнера. Для стабильного адреса используйте именной Cloudflare Tunnel или VPS с доменом — см. раздел 0.2.
 
 ### 0.1. Рабочий режим
 
-Стек работает в защищённом режиме: `APP_ENV=prod`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS-адрес даёт **Tailscale Funnel**: `https://heav1l1ngg.taild084f9.ts.net` проксирует запросы на локальный `frontend:5173`. Адрес постоянный, пока включён компьютер и запущен Tailscale; домен `tezis.work.gd` пока не используется.
+Стек работает в защищённом режиме: `APP_ENV=prod`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS сейчас проксируется на локальный `frontend:5173`; ранее использовался Tailscale Funnel, но он нестабильно доставлял вебхуки Telegram и не открывался с мобильного клиента.
 
-Бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: Tailscale Funnel нестабильно доставлял входящие вебхуки Telegram, тогда как `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`.
+Бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`.
+
+### 0.2. Постоянный HTTPS-адрес
+
+**Вариант А — именной Cloudflare Tunnel (ПК должен оставаться включённым).**
+
+1. Cloudflare Zero Trust → **Networks → Tunnels** → Create a tunnel → скопируйте токен.
+2. В DNS Cloudflare добавьте CNAME: `tezis` → `<tunnel-id>.cfargotunnel.com` (или `@` для корня домена).
+3. Положите токен только в `.env`: `TUNNEL_TOKEN=...` (не коммитить).
+4. Поднимите туннель:
+
+   ```bash
+   docker compose -p tezis --profile tunnel \
+     -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate tunnel
+   ```
+
+5. Пропишите новый адрес в окружении и боте:
+
+   ```bash
+   python scripts/set_public_url.py https://tezis.example.com
+   docker compose -p tezis --profile polling \
+     -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate api bot worker frontend
+   docker compose -p tezis --profile polling \
+     -f docker-compose.yml -f docker-compose.prod.yml exec -T -e PYTHONPATH=/app api \
+     python /app/scripts/set_bot_menu.py
+   ```
+
+6. У @BotFather выполните `/setdomain` → `tezis.example.com` (нужен для Login Widget в админке).
+
+**Вариант Б — VPS с публичным IP (работает при выключенном ПК).** Используйте раздел 2 ниже: Caddy сам выпустит HTTPS-сертификат для `DOMAIN`, сервис `tunnel` не нужен. Бот может остаться в polling или вернуться на webhook, так как адрес больше не меняется.
 
 Пересоздание стека с polling-ботом:
 
@@ -37,11 +58,11 @@ docker compose -p tezis --profile polling -f docker-compose.yml -f docker-compos
 Если адрес меняется, синхронизировать `.env` можно одной командой:
 
 ```bash
-python scripts/set_public_url.py https://<новый-адрес>.ts.net
+python scripts/set_public_url.py https://<новый-адрес>.trycloudflare.com
 docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate api frontend worker
 ```
 
-Скрипт обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS`. Секреты он не трогает и не выводит. Funnel поднимается командой `tailscale funnel --bg 5173` (от имени администратора).
+Скрипт обновляет `FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS`. Секреты он не трогает и не выводит. Временный туннель поднимается контейнером `tezis-cf-tunnel`; для постоянного адреса используйте раздел 0.2.
 
 Случайные секреты для production можно сгенерировать командой `python scripts/harden_env.py` — она меняет только плейсхолдеры и не выводит значения. Конфигурация проверяется при старте: при `APP_ENV=prod` приложение откажется запускаться с демо-секретами, `DEBUG=true`, тестовой оплатой или не HTTPS-адресами.
 
