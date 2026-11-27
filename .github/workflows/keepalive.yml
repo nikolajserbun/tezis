@@ -1,10 +1,10 @@
-name: Keep Render API awake
+name: Ping Tezis API
 
-# Render's free web service sleeps after 15 minutes without traffic. A ping
-# every 10 minutes keeps the Telegram webhook responsive. If you rename the
-# Render service, update the URL below (and FRONTEND_URL / VITE_API_BASE).
+# Vercel Functions wake on demand, so this ping is only a cheap uptime check.
+# Periodic jobs run via Vercel Cron (/api/v1/internal/maintenance).
+# If the project name changes, update the URL below.
 #
-# GitHub may delay scheduled runs, and disables schedules after long periods
+# GitHub may delay scheduled runs and disables schedules after long periods
 # of repository inactivity. Any push re-enables them.
 
 on:
@@ -21,4 +21,4 @@ jobs:
       - name: Ping health endpoint
         run: |
           curl -fsS --retry 3 --retry-delay 10 --max-time 60 \
-            https://tezis-studio-api.onrender.com/api/v1/health/live
+            https://tezis-studio.vercel.app/api/v1/health/live

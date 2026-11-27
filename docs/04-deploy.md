@@ -1,6 +1,6 @@
 # Развёртывание «Тезиса»
 
-**Версия:** 0.4 · **Дата:** 27.11.2026
+**Версия:** 0.5 · **Дата:** 27.11.2026
 
 ## 0. Что проверено, а что нет
 
@@ -12,15 +12,15 @@
 - `pytest -q` — 83 теста пройдено;
 - Docker Compose: `postgres`, `redis`, `api`, `worker`, `bot` (polling), `frontend`, `searxng`.
 
-Mini App требует **HTTPS**. Сейчас публичный адрес даёт временный Cloudflare quick tunnel (`*.trycloudflare.com`), поднятый контейнером `tezis-cf-tunnel`. Он работает, но адрес меняется при каждом перезапуске контейнера. Для стабильного адреса используйте именной Cloudflare Tunnel или VPS с доменом — см. раздел 0.2. Для работы без включённого ПК есть бесплатный вариант на Render — см. раздел 0.3.
+Mini App требует **HTTPS**. Сейчас публичный адрес даёт временный Cloudflare quick tunnel (`*.trycloudflare.com`), поднятый контейнером `tezis-cf-tunnel`. Он работает, но адрес меняется при каждом перезапуске контейнера. Для стабильного адреса используйте именной Cloudflare Tunnel или VPS с доменом — см. раздел 0.2. Для работы без включённого ПК рекомендуется бесплатный вариант на Vercel — см. раздел 0.3. Render остаётся запасным вариантом (требует карту для подтверждения личности) — см. раздел 0.4.
 
 ### 0.1. Рабочий режим
 
-Ниже описан локальный стек для разработки. Для постоянной работы без ПК используйте Render — раздел 0.3.
+Ниже описан локальный стек для разработки. Для постоянной работы без ПК используйте Vercel — раздел 0.3.
 
 Локальный стек работает в защищённом режиме: `APP_ENV=prod`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS сейчас проксируется на локальный `frontend:5173`; ранее использовался Tailscale Funnel, но он нестабильно доставлял вебхуки Telegram и не открывался с мобильного клиента.
 
-В локальном режиме бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`. На Render используется webhook.
+В локальном режиме бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`. В облаке (Vercel, Render) используется webhook.
 
 ### 0.2. Постоянный HTTPS-адрес
 
@@ -70,11 +70,97 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 
 Поиск для чата работает через `TAVILY_API_KEY`, `SERPER_API_KEY` или свой `searxng` (`SEARXNG_URL=http://searxng:8080`, контейнер поднимается Compose). Секрет своего SearXNG задаётся переменной `SEARXNG_SECRET` в `.env`; `searxng/settings.yml` использует подстановку окружения. Бесплатного безлимитного ключа у коммерческих провайдеров нет; SearXNG не требует ключа, но не даёт гарантий по доступности и зависит от правил поисковых систем.
 
-## 0.3. Render — бесплатный постоянный вариант
+## 0.3. Vercel — бесплатный постоянный вариант (рекомендуется)
+
+Render требует привязать карту через Stripe для подтверждения личности; российские карты туда не принимаются. Vercel Hobby работает без карты, а `vercel.json` уже описывает оба сервиса в одном проекте.
+
+| Компонент | Где работает | Стоимость |
+| --- | --- | --- |
+| API + Telegram webhook | Vercel Function (FastAPI) | $0 |
+| Mini App, админка, лендинг | Vercel Static (тот же домен, `/app`, `/admin`) | $0 |
+| PostgreSQL | Supabase Free (проект уже создан) | $0 |
+| FSM и rate limit | Upstash Redis Free | $0 |
+| Cron-задачи | Vercel Cron + GitHub Actions → `/api/v1/internal/maintenance` | $0 |
+| Ошибки | Sentry/GlitchTip или Telegram-алерты | $0 |
+
+API и фронтенд живут на одном домене: `https://<проект>.vercel.app/api/...` и `https://<проект>.vercel.app/app`. Поэтому `VITE_API_BASE` оставляем пустым — Mini App ходит на тот же origin, CORS не нужен.
+
+### 0.3.1. Supabase
+
+Используйте созданный проект. В **Connect → Session pooler** возьмите IPv4-строку вида
+`postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-1-<регион>.pooler.supabase.com:5432/postgres?sslmode=require`
+и вставьте её в `DATABASE_URL`. Строку никому не отправляйте. Приложение само приводит её к формату asyncpg.
+
+### 0.3.2. Upstash Redis
+
+1. [console.upstash.com](https://console.upstash.com) → **Redis → Create database**.
+2. Plan: **Free** (250 МБ, 500 000 команд/мес, карта не нужна), регион рядом с Vercel/Supabase.
+3. Скопируйте **Redis Connect URL** (`rediss://...`) в `REDIS_URL`. Он хранит состояния FSM бота и лимиты; без него многошаговые сценарии бота работать не будут.
+
+### 0.3.3. Проект Vercel
+
+1. [vercel.com/new](https://vercel.com/new) → **Import** репозиторий `nikolajserbun/tezis`, ветка `main`.
+2. Name: `tezis-studio` (итоговый адрес `https://tezis-studio.vercel.app`). **Root Directory не меняйте** — `vercel.json` сам определяет `frontend/` и `backend/`.
+3. Перед Deploy добавьте Environment Variables (Production):
+
+| Переменная | Значение |
+| --- | --- |
+| `APP_ENV` | `prod` |
+| `DEBUG` | `false` |
+| `AUTO_CREATE_TABLES` | `false` |
+| `MAINTENANCE_ENABLED` | `false` (задачи запускает Cron) |
+| `DEV_PAYMENTS_ENABLED` | `false` |
+| `BOT_MODE` | `webhook` |
+| `ALLOW_PROD_POLLING` | `false` |
+| `BOT_USERNAME` | `TezisStudioBot` |
+| `SUPPORT_CHAT_ID`, `COMMUNITY_CHAT_ID` | `0` |
+| `AI_PROVIDER` | `cloudflare` |
+| `AI_MODEL` | `@cf/meta/llama-3.2-3b-instruct` |
+| `AI_MAX_TOKENS` | `1800` |
+| `FREE_NEURONS` | `500` |
+| `DATABASE_URL` | строка Supabase из 0.3.1 |
+| `REDIS_URL` | строка Upstash из 0.3.2 |
+| `BOT_TOKEN`, `OWNER_TG_ID`, `ADMIN_CHAT_ID` | из локального `.env` |
+| `AI_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` | из Cloudflare Workers AI |
+| `CRON_SECRET` | случайная строка (обязательно) |
+| `SECRET_KEY`, `JWT_SECRET`, `WEBHOOK_SECRET`, `DEV_ADMIN_PASSWORD` | случайные строки, не плейсхолдеры |
+| `SENTRY_DSN` | можно оставить пустым |
+| `VITE_API_BASE` | оставить пустым |
+
+`FRONTEND_URL`, `PUBLIC_BASE_URL`, `WEBHOOK_BASE_URL` и `CORS_ORIGINS` можно не задавать: Vercel передаёт `VERCEL_URL`, и конфигурация подставляет `https://<проект>.vercel.app` сама. Если используете свой домен, задайте их явно и включите домен в `CORS_ORIGINS`.
+
+Случайный секрет, не печатая его в чат:
+
+```powershell
+powershell -NoProfile -Command "$b=New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Fill($b); Set-Clipboard -Value ([Convert]::ToBase64String($b)); 'copied'"
+```
+
+4. Нажмите **Deploy**. `vercel.json` соберёт Vite-фронтенд и FastAPI-бэкенд в одном деплое.
+5. После первого успешного деплоя **один раз** вызовите инициализацию БД (миграции + базовые товары). Если вы импортировали дамп из 0.4.5, этот шаг можно пропустить:
+
+```bash
+curl -X POST -H "Authorization: Bearer <CRON_SECRET>" \
+  https://tezis-studio.vercel.app/api/v1/internal/setup
+```
+
+6. @BotFather → `/setdomain` → `tezis-studio.vercel.app`; `/setmenubutton` → `https://tezis-studio.vercel.app/app`.
+7. Проверьте `getWebhookInfo`: ожидаемый URL `https://tezis-studio.vercel.app/api/v1/webhooks/telegram`.
+
+Vercel Cron раз в сутки вызывает `/api/v1/internal/maintenance` с тем же `CRON_SECRET`. На Hobby это максимум; чтобы задачи выполнялись чаще, добавьте тот же `CRON_SECRET` в **Secrets репозитория GitHub** — workflow `.github/workflows/maintenance.yml` вызывает endpoint раз в час. Без секрета workflow ничего не делает. Endpoint можно вызвать вручную, если нужно досрочно закрыть подписки/рассылки.
+
+### 0.3.4. Ограничения Hobby
+
+- Function живёт до 300 секунд; длинные запросы нужно делить. Telegram-обработка на serverless дожидается ответа до отправки 200, поэтому бот отвечает после полного выполнения сценария.
+- Cron на Hobby — не чаще одного раза в сутки.
+- Тело запроса/ответа до 4,5 МБ.
+- Процесс не хранит состояние между запросами: FSM — в Upstash, данные — в Supabase.
+- Холодный старт занимает несколько секунд; Telegram повторяет доставку webhook при таймауте.
+
+## 0.4. Render — запасной вариант (нужна карта)
 
 Этот вариант рассчитан на работу без включённого ПК и без VPS. Render даёт постоянный HTTPS-адрес `https://*.onrender.com`.
 
-### 0.3.1. Что где будет работать
+### 0.4.1. Что где будет работать
 
 | Компонент | Render | Стоимость |
 | --- | --- | --- |
@@ -85,9 +171,9 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 | Ошибки | Sentry или совместимый сервис | $0 |
 | Cron-задачи | внутри API (`MAINTENANCE_ENABLED=true`) | $0 |
 
-Почему не Render Postgres: бесплатная база Render удаляется через 30 дней. Поэтому база внешняя. Бесплатный web service Render засыпает после 15 минут без запросов; Telegram webhook будит его, но первый ответ может занять до минуты. Workflow `.github/workflows/keepalive.yml` пингует health каждые 10 минут, чтобы бот оставался активным.
+Почему не Render Postgres: бесплатная база Render удаляется через 30 дней. Поэтому база внешняя. Бесплатный web service Render засыпает после 15 минут без запросов; Telegram webhook будит его, но первый ответ может занять до минуты. При использовании Render обновите URL в `.github/workflows/keepalive.yml` (сейчас workflow пингует Vercel).
 
-### 0.3.2. Внешняя PostgreSQL
+### 0.4.2. Внешняя PostgreSQL
 
 **Вариант А — Neon Free.** Если `neon.tech` открывается из вашего региона:
 
@@ -109,7 +195,7 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 
 Приложение само приводит `postgresql://` к `postgresql+asyncpg://`, переводит `sslmode=require` в `ssl=require` и убирает `channel_binding`/`pgbouncer`, которые не понимает asyncpg.
 
-### 0.3.3. Blueprint в Render
+### 0.4.3. Blueprint в Render
 
 1. В [dashboard.render.com](https://dashboard.render.com) нажмите **New → Blueprint**.
 2. Подключите GitHub-репозиторий `nikolajserbun/tezis`, ветку `main`.
@@ -138,7 +224,7 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 - `VITE_API_BASE` — на URL API;
 - URL в `.github/workflows/keepalive.yml`.
 
-### 0.3.4. Telegram
+### 0.4.4. Telegram
 
 1. @BotFather → `/setmenubutton` → выберите бота → `https://tezis-studio-web.onrender.com/app`.
 2. @BotFather → `/setdomain` → `tezis-studio-web.onrender.com` (нужно для Login Widget в админке).
@@ -149,7 +235,7 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 
 `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false`, `WEBHOOK_BASE_URL` и `PUBLIC_BASE_URL` берутся из `RENDER_EXTERNAL_URL` автоматически.
 
-### 0.3.5. Перенос текущих данных (необязательно)
+### 0.4.5. Перенос текущих данных (необязательно)
 
 Готовый дамп уже лежит в `backups/render_migration.sql` (проверен импортом в чистую PostgreSQL 16: `users=5`, `products=9`, `usage_events=25`, заказов `0`). Он не содержит прав, владельцев и команд `\restrict`, поэтому подходит для Neon и Supabase.
 
@@ -175,7 +261,7 @@ docker compose -p tezis stop postgres
 
 `usage_events` не удаляйте: там расход Neurons. Финансовые таблицы уже очищены.
 
-### 0.3.6. Sentry и Telegram-алерты
+### 0.4.6. Sentry и Telegram-алерты
 
 - Sentry: создайте проект Python/FastAPI на [sentry.io](https://sentry.io), скопируйте DSN в `SENTRY_DSN`. Ошибки API и worker попадут в Sentry; бесплатный лимит — 5 000 событий/мес. Если `sentry.io` заблокирован в вашем регионе, оставьте `SENTRY_DSN` пустым — Telegram-алерты и логи Render продолжают работать. DSN совместимого [GlitchTip](https://glitchtip.com/) (бесплатно 1 000 событий/мес) также можно вставить сюда: Sentry SDK принимает его.
 - Telegram: `ADMIN_CHAT_ID` должен быть вашим ID (или ID группы, куда добавлен бот). Алерты приходят при:
@@ -185,7 +271,7 @@ docker compose -p tezis stop postgres
   - необработанной ошибке API (не чаще одного раза в 5 минут).
 - Render дополнительно присылает email о неудачных деплоях.
 
-### 0.3.7. Проверка после деплоя
+### 0.4.7. Проверка после деплоя
 
 ```bash
 curl -fsS https://tezis-studio-api.onrender.com/api/v1/health/live
@@ -195,7 +281,7 @@ curl -fsS https://tezis-studio-api.onrender.com/api/v1/catalog | head -c 500
 
 Откройте `https://tezis-studio-web.onrender.com/app` из Telegram и `https://tezis-studio-web.onrender.com/admin`. Проверьте вход, каталог, генерацию и Stars-платёж на реальном аккаунте.
 
-### 0.3.8. Ограничения бесплатного варианта
+### 0.4.8. Ограничения бесплатного варианта
 
 - Web service засыпает через 15 минут без входящих запросов. Первый запрос после сна может занять до минуты; Telegram повторяет доставку webhook. Keep-alive workflow уменьшает это, но GitHub может задерживать запуски.
 - Free Key Value хранит данные только в памяти: состояния FSM и rate-limit сбрасываются при рестарте. Для бота это допустимо.

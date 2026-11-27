@@ -37,12 +37,18 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
     # Set automatically by Render for every web service.
     render_external_url: str = ""
+    # Set automatically by Vercel. VERCEL_URL has no scheme; the value is used
+    # as a fallback for public/webhook URLs unless they are configured explicitly.
+    vercel: str = ""
+    vercel_url: str = ""
 
     # Security
     secret_key: str = "change-me-in-production"
     jwt_secret: str = "change-me-jwt-in-production"
     jwt_expire_minutes: int = 720
     webhook_secret: str = "change-me-webhook-secret"
+    # Bearer token for /api/v1/internal/* (Vercel Cron sends CRON_SECRET).
+    cron_secret: str = ""
     dev_admin_email: str = "owner@tezis.local"
     dev_admin_password: str = "tezis-dev-2026"
     dev_payments_enabled: bool = True
@@ -92,6 +98,11 @@ class Settings(BaseSettings):
     @property
     def is_prod(self) -> bool:
         return self.app_env.lower() == "prod"
+
+    @property
+    def is_serverless(self) -> bool:
+        """True on Vercel, where processes are short-lived and stateless."""
+        return bool(self.vercel or self.vercel_url)
 
     @property
     def telegram_webhook_secret(self) -> str:
@@ -160,6 +171,33 @@ class Settings(BaseSettings):
             if not self.webhook_base_url:
                 self.webhook_base_url = render_url
 
+        # Vercel exposes the deployment hostname without a scheme. Prefer the
+        # operator's explicit URLs, but make the first deploy work without them.
+        vercel_url = self.vercel_url.strip().rstrip("/")
+        if vercel_url:
+            vercel_origin = (
+                vercel_url
+                if vercel_url.startswith("https://")
+                else f"https://{vercel_url}"
+            )
+            if not self.public_base_url or self.public_base_url.startswith(
+                "http://localhost"
+            ):
+                self.public_base_url = vercel_origin
+            if not self.webhook_base_url:
+                self.webhook_base_url = vercel_origin
+            if not self.frontend_url.startswith("https://"):
+                self.frontend_url = vercel_origin
+            origins = {
+                origin.strip()
+                for origin in self.cors_origins.split(",")
+                if origin.strip()
+            }
+            if not origins or all(
+                origin.startswith("http://localhost") for origin in origins
+            ):
+                self.cors_origins = vercel_origin
+
         placeholder_prefixes = (
             "change-me",
             "replace-with",
@@ -175,6 +213,10 @@ class Settings(BaseSettings):
         for name, value in secrets.items():
             if not value or value.startswith(placeholder_prefixes):
                 raise ValueError(f"{name} must be replaced in production")
+        if self.is_serverless and (
+            not self.cron_secret or self.cron_secret.startswith(placeholder_prefixes)
+        ):
+            raise ValueError("CRON_SECRET must be replaced in serverless production")
         if not self.bot_token:
             raise ValueError("BOT_TOKEN is required in production")
         if self.owner_tg_id <= 0:

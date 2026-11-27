@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 backups/
+.vercel/
 *.db
 *.sqlite
 *.sqlite3

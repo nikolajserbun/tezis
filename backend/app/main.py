@@ -125,11 +125,22 @@ async def lifespan(app: FastAPI):
             await _set_webhook_and_commands(bot, dp, url, logger)
         except TelegramNetworkError as exc:
             logger.warning("webhook_setup_deferred", url=url, error=str(exc))
-            webhook_task = asyncio.create_task(
-                _retry_webhook_setup(bot, dp, url, logger)
-            )
+            if settings.is_serverless:
+                # A serverless invocation cannot keep a retry task alive after
+                # it responds; the next cold start will try again.
+                logger.warning("webhook_setup_retry_skipped_serverless")
+                await notifications.notify_admins(
+                    bot,
+                    "❌ <b>Не удалось установить webhook Telegram</b>\n\n"
+                    f"URL: <code>{url}</code>\n"
+                    "Проверьте BOT_TOKEN и доступность API.",
+                )
+            else:
+                webhook_task = asyncio.create_task(
+                    _retry_webhook_setup(bot, dp, url, logger)
+                )
 
-    if settings.is_prod and bot is not None:
+    if settings.is_prod and bot is not None and not settings.is_serverless:
         # Do not slow down startup (and Render's health check) on Telegram.
         alert = asyncio.create_task(
             notifications.notify_admins(
@@ -142,9 +153,10 @@ async def lifespan(app: FastAPI):
         app.state.alert_tasks.add(alert)
         alert.add_done_callback(app.state.alert_tasks.discard)
 
-    if settings.maintenance_enabled:
+    if settings.maintenance_enabled and not settings.is_serverless:
         # Imported lazily so local/dev runs do not import the ARQ worker unless
-        # they actually use the in-process scheduler.
+        # they actually use the in-process scheduler. Serverless deployments
+        # call /api/v1/internal/maintenance from Vercel Cron instead.
         from app.maintenance import run_forever
 
         maintenance_task = asyncio.create_task(run_forever())
@@ -230,16 +242,19 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
     if should_alert("unhandled_error"):
         bot = getattr(request.app.state, "bot", None)
         if bot is not None:
-            task = asyncio.create_task(
-                notifications.notify_admins(
-                    bot,
-                    "❗️ <b>Необработанная ошибка API</b>\n\n"
-                    f"Путь: <code>{request.url.path}</code>\n"
-                    f"Тип: <code>{type(exc).__name__}</code>",
-                )
+            message = (
+                "❗️ <b>Необработанная ошибка API</b>\n\n"
+                f"Путь: <code>{request.url.path}</code>\n"
+                f"Тип: <code>{type(exc).__name__}</code>"
             )
-            request.app.state.alert_tasks.add(task)
-            task.add_done_callback(request.app.state.alert_tasks.discard)
+            if settings.is_serverless:
+                # A background task would be frozen with the function instance
+                # as soon as the response is sent, so deliver it inline.
+                await notifications.notify_admins(bot, message)
+            else:
+                task = asyncio.create_task(notifications.notify_admins(bot, message))
+                request.app.state.alert_tasks.add(task)
+                task.add_done_callback(request.app.state.alert_tasks.discard)
     return JSONResponse(
         status_code=500,
         content={"error": "internal_error", "message": "Внутренняя ошибка сервера"},

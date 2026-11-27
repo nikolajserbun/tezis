@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from typing import Any
 
 from sqlalchemy import select
 
@@ -21,7 +22,7 @@ from app.models import Product, User, UserRole
 from app.services import orders, payments, referrals, users
 from app.services import settings as settings_service
 
-PRODUCTS = [
+PRODUCTS: list[dict[str, Any]] = [
     {
         "slug": "start-month",
         "title": "Start · месяц",

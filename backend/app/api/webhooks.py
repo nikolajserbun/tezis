@@ -60,8 +60,9 @@ async def telegram_webhook(
     webhooks are registered with the secret only in the
     ``X-Telegram-Bot-Api-Secret-Token`` header.
 
-    The update is processed in the background. Telegram expects a fast 200,
-    while sending a reply can take tens of seconds on a slow connection.
+    On a long-running server the update is processed in the background so
+    Telegram gets a fast 200. On serverless (Vercel) it is processed inline,
+    because the function is frozen as soon as the response is sent.
     """
     candidate = x_telegram_bot_api_secret_token or secret
     if not _secret_is_valid(candidate):
@@ -77,6 +78,12 @@ async def telegram_webhook(
         update = Update.model_validate(payload)
     except Exception as exc:
         logger.exception("webhook_processing_failed", error=str(exc))
+        return {"ok": True}
+
+    if settings.is_serverless:
+        # Vercel freezes the instance as soon as the response is sent, so the
+        # bot must finish before Telegram receives the 200.
+        await _process_update(bot, dp, update)
         return {"ok": True}
 
     task = asyncio.create_task(_process_update(bot, dp, update))

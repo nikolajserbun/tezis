@@ -1,0 +1,29 @@
+name: Tezis maintenance
+
+# Vercel Hobby cron jobs can run only once per day. This hourly GitHub Action
+# calls the same protected endpoint more often. Add CRON_SECRET as a repository
+# secret; without it the workflow is a no-op. Vercel Cron remains the fallback.
+
+on:
+  schedule:
+    - cron: "5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run periodic jobs
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          API_URL: https://tezis-studio.vercel.app/api/v1/internal/maintenance
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET repository secret is not set; skipping"
+            exit 0
+          fi
+          curl -fsS --retry 3 --retry-delay 10 --max-time 300 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$API_URL"
