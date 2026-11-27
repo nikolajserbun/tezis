@@ -130,12 +130,17 @@ async def lifespan(app: FastAPI):
             )
 
     if settings.is_prod and bot is not None:
-        await notifications.notify_admins(
-            bot,
-            "✅ <b>Tezis API запущен</b>\n\n"
-            f"Режим бота: <code>{settings.bot_mode}</code>\n"
-            f"Окружение: <code>{settings.app_env}</code>",
+        # Do not slow down startup (and Render's health check) on Telegram.
+        alert = asyncio.create_task(
+            notifications.notify_admins(
+                bot,
+                "✅ <b>Tezis API запущен</b>\n\n"
+                f"Режим бота: <code>{settings.bot_mode}</code>\n"
+                f"Окружение: <code>{settings.app_env}</code>",
+            )
         )
+        app.state.alert_tasks.add(alert)
+        alert.add_done_callback(app.state.alert_tasks.discard)
 
     if settings.maintenance_enabled:
         # Imported lazily so local/dev runs do not import the ARQ worker unless
