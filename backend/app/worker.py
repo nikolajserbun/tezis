@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.db import SessionLocal, create_all, engine
 from app.core.logging import configure_logging, get_logger
+from app.core.monitoring import init_sentry
 from app.core.utils import utcnow
 from app.models import Broadcast, BroadcastStatus, User
 from app.services import ai, broadcasts, chat, community, delivery, notifications, subscriptions
@@ -133,6 +134,7 @@ async def cleanup_generation_history(ctx: dict) -> dict:
 
 async def startup(ctx: dict) -> None:
     configure_logging()
+    init_sentry()
     if settings.auto_create_tables and not settings.is_prod:
         await create_all()
     get_logger("worker").info("worker_started")

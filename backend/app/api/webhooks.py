@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, Request
 from app.core.config import settings
 from app.core.errors import Forbidden, ServiceUnavailable
 from app.core.logging import get_logger
+from app.core.monitoring import capture_exception, should_alert
 from app.services import notifications
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -20,7 +21,9 @@ def _secret_is_valid(candidate: str | None) -> bool:
     expected = settings.webhook_secret
     if not expected or expected.startswith("change-me"):
         return False
-    return candidate is not None and compare_digest(candidate, expected)
+    return candidate is not None and compare_digest(
+        candidate, settings.telegram_webhook_secret
+    )
 
 
 async def _process_update(bot: Bot, dp: Dispatcher, update: Update) -> None:
@@ -31,15 +34,17 @@ async def _process_update(bot: Bot, dp: Dispatcher, update: Update) -> None:
         # owner and keep it in logs/Sentry; the webhook already returned 200
         # so a transient handler error does not cause a retry storm.
         logger.exception("webhook_processing_failed", error=str(exc))
-        try:
-            await notifications.notify_admins(
-                bot,
-                "❗️ <b>Ошибка обработки webhook Telegram</b>\n\n"
-                f"Тип: <code>{type(exc).__name__}</code>\n"
-                "Проверьте логи API и статус заказа вручную.",
-            )
-        except Exception as notify_exc:
-            logger.exception("webhook_alert_failed", error=str(notify_exc))
+        capture_exception(exc)
+        if should_alert("webhook_processing"):
+            try:
+                await notifications.notify_admins(
+                    bot,
+                    "❗️ <b>Ошибка обработки webhook Telegram</b>\n\n"
+                    f"Тип: <code>{type(exc).__name__}</code>\n"
+                    "Проверьте логи API и статус заказа вручную.",
+                )
+            except Exception as notify_exc:
+                logger.exception("webhook_alert_failed", error=str(notify_exc))
 
 
 @router.post("/telegram")

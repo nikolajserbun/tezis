@@ -219,12 +219,13 @@ async def seed_demo(session, owner: User, products: dict[str, Product]) -> None:
         await payments.confirm_manual_payment(session, order_id=order.id)
 
 
-async def main() -> None:
+async def main(create_schema: bool = True) -> None:
     parser = argparse.ArgumentParser(description="Seed Tezis database")
     parser.add_argument("--demo", action="store_true", help="create demo customers and orders")
     args = parser.parse_args()
 
-    await create_all()
+    if create_schema:
+        await create_all()
     async with SessionLocal() as session:
         owner, _ = await users.get_or_create_user(
             session,

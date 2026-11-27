@@ -1,6 +1,6 @@
 # Развёртывание «Тезиса»
 
-**Версия:** 0.3 · **Дата:** 26.11.2026
+**Версия:** 0.4 · **Дата:** 27.11.2026
 
 ## 0. Что проверено, а что нет
 
@@ -9,16 +9,18 @@
 - `alembic upgrade head` на SQLite и PostgreSQL 16;
 - `python -m scripts.seed --demo`;
 - `ruff check .` и `mypy app` — без ошибок;
-- `pytest -q` — 76 тестов пройдено;
+- `pytest -q` — 83 теста пройдено;
 - Docker Compose: `postgres`, `redis`, `api`, `worker`, `bot` (polling), `frontend`, `searxng`.
 
-Mini App требует **HTTPS**. Сейчас публичный адрес даёт временный Cloudflare quick tunnel (`*.trycloudflare.com`), поднятый контейнером `tezis-cf-tunnel`. Он работает, но адрес меняется при каждом перезапуске контейнера. Для стабильного адреса используйте именной Cloudflare Tunnel или VPS с доменом — см. раздел 0.2.
+Mini App требует **HTTPS**. Сейчас публичный адрес даёт временный Cloudflare quick tunnel (`*.trycloudflare.com`), поднятый контейнером `tezis-cf-tunnel`. Он работает, но адрес меняется при каждом перезапуске контейнера. Для стабильного адреса используйте именной Cloudflare Tunnel или VPS с доменом — см. раздел 0.2. Для работы без включённого ПК есть бесплатный вариант на Render — см. раздел 0.3.
 
 ### 0.1. Рабочий режим
 
-Стек работает в защищённом режиме: `APP_ENV=prod`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS сейчас проксируется на локальный `frontend:5173`; ранее использовался Tailscale Funnel, но он нестабильно доставлял вебхуки Telegram и не открывался с мобильного клиента.
+Ниже описан локальный стек для разработки. Для постоянной работы без ПК используйте Render — раздел 0.3.
 
-Бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`.
+Локальный стек работает в защищённом режиме: `APP_ENV=prod`, тестовая оплата и вход по email/паролю отключены. Генерации используют Cloudflare Workers AI. Публичный HTTPS сейчас проксируется на локальный `frontend:5173`; ранее использовался Tailscale Funnel, но он нестабильно доставлял вебхуки Telegram и не открывался с мобильного клиента.
+
+В локальном режиме бот работает в режиме `BOT_MODE=polling` с явным `ALLOW_PROD_POLLING=true`: `getUpdates` работает надёжно. Вебхук-код и секрет остаются в проекте; при возврате на вебхук выставьте `BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false` и поднимите стек без профиля `polling`. На Render используется webhook.
 
 ### 0.2. Постоянный HTTPS-адрес
 
@@ -67,6 +69,123 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 Случайные секреты для production можно сгенерировать командой `python scripts/harden_env.py` — она меняет только плейсхолдеры и не выводит значения. Конфигурация проверяется при старте: при `APP_ENV=prod` приложение откажется запускаться с демо-секретами, `DEBUG=true`, тестовой оплатой или не HTTPS-адресами.
 
 Поиск для чата работает через `TAVILY_API_KEY`, `SERPER_API_KEY` или свой `searxng` (`SEARXNG_URL=http://searxng:8080`, контейнер поднимается Compose). Секрет своего SearXNG задаётся переменной `SEARXNG_SECRET` в `.env`; `searxng/settings.yml` использует подстановку окружения. Бесплатного безлимитного ключа у коммерческих провайдеров нет; SearXNG не требует ключа, но не даёт гарантий по доступности и зависит от правил поисковых систем.
+
+## 0.3. Render — бесплатный постоянный вариант
+
+Этот вариант рассчитан на работу без включённого ПК и без VPS. Render даёт постоянный HTTPS-адрес `https://*.onrender.com`.
+
+### 0.3.1. Что где будет работать
+
+| Компонент | Render | Стоимость |
+| --- | --- | --- |
+| API + Telegram webhook | Free Web Service | $0 |
+| Mini App, админка, лендинг | Free Static Site | $0 |
+| FSM и rate limit | Free Key Value (25 МБ) | $0 |
+| PostgreSQL | Neon Free (внешняя БД) | $0 |
+| Ошибки | Sentry Free | $0 |
+| Cron-задачи | внутри API (`MAINTENANCE_ENABLED=true`) | $0 |
+
+Почему не Render Postgres: бесплатная база Render удаляется через 30 дней. Поэтому база — Neon Free (0,5 ГБ, постоянная, с авто-засыпанием). Бесплатный web service Render засыпает после 15 минут без запросов; Telegram webhook будит его, но первый ответ может занять до минуты. Workflow `.github/workflows/keepalive.yml` пингует health каждые 10 минут, чтобы бот оставался активным.
+
+### 0.3.2. Neon
+
+1. Зарегистрируйтесь на [neon.tech](https://neon.tech) и создайте проект в регионе Frankfurt (`eu-central-1`).
+2. Скопируйте **direct** connection string (не `-pooler`), вид:
+   `postgresql://USER:PASSWORD@ep-...eu-central-1.aws.neon.tech/neondb?sslmode=require`
+3. Никому не отправляйте эту строку: в ней пароль. Она понадобится только в Render.
+
+Приложение само приводит `postgresql://` к `postgresql+asyncpg://` и убирает параметры `channel_binding`/`pgbouncer`, которые не понимает asyncpg. `sslmode=require` сохраняется.
+
+### 0.3.3. Blueprint в Render
+
+1. В [dashboard.render.com](https://dashboard.render.com) нажмите **New → Blueprint**.
+2. Подключите GitHub-репозиторий `nikolajserbun/tezis`, ветку `main`.
+3. Render прочитает `render.yaml` и создаст:
+   - `tezis-studio-api` (free web service);
+   - `tezis-studio-web` (free static site);
+   - `tezis-studio-redis` (free Key Value).
+4. Render попросит заполнить переменные с `sync: false`:
+
+| Переменная | Что ввести |
+| --- | --- |
+| `DATABASE_URL` | строка Neon из 0.3.2 |
+| `BOT_TOKEN` | токен от @BotFather |
+| `OWNER_TG_ID` | ваш Telegram ID, например `1894774240` |
+| `ADMIN_CHAT_ID` | ваш Telegram ID для алертов (можно тот же); `0` — без алертов |
+| `AI_API_KEY` | токен Cloudflare Workers AI |
+| `CLOUDFLARE_ACCOUNT_ID` | Account ID из Cloudflare |
+| `SENTRY_DSN` | DSN проекта Sentry (можно оставить пустым) |
+
+Остальные секреты (`SECRET_KEY`, `JWT_SECRET`, `WEBHOOK_SECRET`, `DEV_ADMIN_PASSWORD`) Render сгенерирует сам. `WEBHOOK_SECRET` автоматически приводится к формату Telegram `A-Za-z0-9_-`.
+
+5. Нажмите **Apply**. Первый деплой выполнит `alembic upgrade head`, затем `scripts.bootstrap` (сидит базовые данные только если таблица товаров пуста) и запустит uvicorn.
+
+Если Render добавил к имени суффикс (например, `tezis-studio-api-xxxx`), обновите в `render.yaml` и в дашборде:
+- `FRONTEND_URL` и `CORS_ORIGINS` — на URL статического сайта;
+- `VITE_API_BASE` — на URL API;
+- URL в `.github/workflows/keepalive.yml`.
+
+### 0.3.4. Telegram
+
+1. @BotFather → `/setmenubutton` → выберите бота → `https://tezis-studio-web.onrender.com/app`.
+2. @BotFather → `/setdomain` → `tezis-studio-web.onrender.com` (нужно для Login Widget в админке).
+3. Откройте бота и отправьте `/start`, чтобы он мог писать вам алерты.
+4. Проверьте webhook (не вставляйте токен в чаты):
+   `https://api.telegram.org/bot<TOKEN>/getWebhookInfo`
+   Ожидаемый URL: `https://tezis-studio-api.onrender.com/api/v1/webhooks/telegram`.
+
+`BOT_MODE=webhook`, `ALLOW_PROD_POLLING=false`, `WEBHOOK_BASE_URL` и `PUBLIC_BASE_URL` берутся из `RENDER_EXTERNAL_URL` автоматически.
+
+### 0.3.5. Перенос текущих данных (необязательно)
+
+Если нужны текущие пользователи, товары и история, а не только базовые данные:
+
+```bash
+# 1. Дамп локальной базы без владельцев и прав
+docker compose -p tezis up -d postgres
+docker compose -p tezis exec -T postgres \
+  pg_dump -U tezis -d tezis --no-owner --no-privileges --clean --if-exists \
+  > backups/render_migration.sql
+docker compose -p tezis stop postgres
+
+# 2. Импорт в Neon (PowerShell; строку подключения подставьте свою)
+docker run --rm -v "${PWD}/backups:/backups" postgres:16 \
+  psql "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require" \
+  -v ON_ERROR_STOP=1 -f /backups/render_migration.sql
+```
+
+В дампе есть `alembic_version`, поэтому повторный `alembic upgrade head` при старте будет безопасным. После импорта перезапустите API: **Manual Deploy → Deploy latest commit** (или дождитесь следующего пуша).
+
+`usage_events` не удаляйте: там расход Neurons. Финансовые таблицы уже очищены.
+
+### 0.3.6. Sentry и Telegram-алерты
+
+- Sentry: создайте проект Python/FastAPI на [sentry.io](https://sentry.io), скопируйте DSN в `SENTRY_DSN`. Ошибки API и worker попадут в Sentry; бесплатный лимит — 5 000 событий/мес.
+- Telegram: `ADMIN_CHAT_ID` должен быть вашим ID (или ID группы, куда добавлен бот). Алерты приходят при:
+  - запуске API (в том числе после выхода free-инстанса из сна);
+  - неудачной установке webhook;
+  - ошибке обработки webhook;
+  - необработанной ошибке API (не чаще одного раза в 5 минут).
+- Render дополнительно присылает email о неудачных деплоях.
+
+### 0.3.7. Проверка после деплоя
+
+```bash
+curl -fsS https://tezis-studio-api.onrender.com/api/v1/health/live
+curl -fsS https://tezis-studio-api.onrender.com/api/v1/health/ready
+curl -fsS https://tezis-studio-api.onrender.com/api/v1/catalog | head -c 500
+```
+
+Откройте `https://tezis-studio-web.onrender.com/app` из Telegram и `https://tezis-studio-web.onrender.com/admin`. Проверьте вход, каталог, генерацию и Stars-платёж на реальном аккаунте.
+
+### 0.3.8. Ограничения бесплатного варианта
+
+- Web service засыпает через 15 минут без входящих запросов. Первый запрос после сна может занять до минуты; Telegram повторяет доставку webhook. Keep-alive workflow уменьшает это, но GitHub может задерживать запуски.
+- Free Key Value хранит данные только в памяти: состояния FSM и rate-limit сбрасываются при рестарте. Для бота это допустимо.
+- Neon Free: 0,5 ГБ и ограниченные compute-часы; при простое база засыпает и просыпается на первом запросе.
+- У free web service нет shell и one-off jobs. Миграции и bootstrap выполняются в start command; данные переносятся с локальной машины.
+- Free instance hours — 750 в месяц. Круглосуточная работа одного сервиса — около 730 часов, поэтому keep-alive оставляет небольшой запас. Если Render начнёт чаще перезапускать сервис, отключите workflow или перейдите на платный план.
+- Render может перезапускать free-сервисы в любое время. Все важные данные хранятся в Neon, поэтому рестарт безопасен.
 
 ## 1. Локальный запуск без Docker
 

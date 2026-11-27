@@ -1,0 +1,176 @@
+# Render Blueprint for Tezis.
+#
+# Free-tier layout:
+#   - API + Telegram webhook (free web service)
+#   - Mini App / admin / landing (free static site)
+#   - Redis-compatible FSM/rate-limit store (free Key Value)
+#   - PostgreSQL is external (Neon free), because Render's free Postgres
+#     expires after 30 days. Put its URL into DATABASE_URL when Render asks.
+#
+# Scheduled jobs run inside the API process (MAINTENANCE_ENABLED=true), so no
+# paid background worker is required. If the free web service is asleep, the
+# first Telegram request wakes it; Telegram retries the webhook.
+#
+# Service names determine the public URLs. If Render appends a suffix because
+# a name is taken, update FRONTEND_URL, CORS_ORIGINS, VITE_API_BASE and the
+# GitHub keep-alive workflow to match.
+
+services:
+  - type: web
+    name: tezis-studio-api
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install .
+    startCommand: >-
+      alembic upgrade head &&
+      python -m scripts.bootstrap &&
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/v1/health/live
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
+
+      # Application
+      - key: APP_ENV
+        value: prod
+      - key: DEBUG
+        value: "false"
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: MAINTENANCE_ENABLED
+        value: "true"
+      - key: DEV_PAYMENTS_ENABLED
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TIMEZONE
+        value: Europe/Moscow
+      - key: TZ
+        value: Europe/Moscow
+      - key: ASSETS_DIR
+        value: assets
+
+      # Public URLs. PUBLIC_BASE_URL and WEBHOOK_BASE_URL are filled from
+      # Render's RENDER_EXTERNAL_URL at runtime. FRONTEND_URL must point to the
+      # static site below and must also be listed in CORS_ORIGINS.
+      - key: FRONTEND_URL
+        value: https://tezis-studio-web.onrender.com
+      - key: CORS_ORIGINS
+        value: https://tezis-studio-web.onrender.com
+
+      # Data stores
+      - key: DATABASE_URL
+        sync: false # Neon: postgresql://...?sslmode=require
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: tezis-studio-redis
+          property: connectionString
+
+      # Secrets. Render generates the first four; the rest are entered in the
+      # dashboard during Blueprint creation and never stored in git.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: DEV_ADMIN_PASSWORD
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_TG_ID
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false # owner Telegram ID for alerts; 0 disables them
+      - key: SENTRY_DSN
+        sync: false
+
+      # Telegram
+      - key: BOT_USERNAME
+        value: TezisStudioBot
+      - key: BOT_MODE
+        value: webhook
+      - key: ALLOW_PROD_POLLING
+        value: "false"
+      - key: SUPPORT_CHAT_ID
+        value: "0"
+      - key: COMMUNITY_CHAT_ID
+        value: "0"
+
+      # AI: Cloudflare Workers AI (free Neurons quota). Change AI_PROVIDER,
+      # AI_BASE_URL and AI_MODEL in the dashboard to use another provider.
+      - key: AI_PROVIDER
+        value: cloudflare
+      - key: AI_MODEL
+        value: "@cf/meta/llama-3.2-3b-instruct"
+      - key: AI_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: AI_MAX_TOKENS
+        value: "1800"
+      - key: AI_NEURONS_PER_1K_TOKENS
+        value: "25"
+      - key: AI_COST_PER_1K_MINOR
+        value: "50"
+      - key: FREE_NEURONS
+        value: "500"
+      - key: GENERATION_HISTORY_DAYS
+        value: "30"
+      - key: TAVILY_API_KEY
+        value: ""
+      - key: SERPER_API_KEY
+        value: ""
+      - key: SEARXNG_URL
+        value: ""
+
+      # Economy
+      - key: STARS_RUB_RATE
+        value: "1.3"
+      - key: REFERRAL_BONUS_MINOR
+        value: "2500"
+
+  - type: web
+    name: tezis-studio-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_API_BASE
+        value: https://tezis-studio-api.onrender.com
+      - key: VITE_BOT_USERNAME
+        value: TezisStudioBot
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /
+        name: Cache-Control
+        value: no-cache, must-revalidate
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache, must-revalidate
+      - path: /app/*
+        name: Cache-Control
+        value: no-cache, must-revalidate
+      - path: /admin/*
+        name: Cache-Control
+        value: no-cache, must-revalidate
+    routes:
+      # SPA fallback for /app/* and /admin/*.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  - type: keyvalue
+    name: tezis-studio-redis
+    plan: free
+    region: frankfurt
+    ipAllowList: [] # private network only
+    maxmemoryPolicy: noeviction

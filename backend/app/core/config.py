@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import re
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,11 +29,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     sentry_dsn: str = ""
     auto_create_tables: bool = True
+    maintenance_enabled: bool = False
 
     # URLs
     public_base_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:5173"
     cors_origins: str = "http://localhost:5173,http://localhost:8000"
+    # Set automatically by Render for every web service.
+    render_external_url: str = ""
 
     # Security
     secret_key: str = "change-me-in-production"
@@ -87,6 +94,50 @@ class Settings(BaseSettings):
         return self.app_env.lower() == "prod"
 
     @property
+    def telegram_webhook_secret(self) -> str:
+        """Return a Telegram-safe webhook secret.
+
+        Telegram only accepts ``A-Za-z0-9_-`` in ``secret_token``. Render's
+        generated values are base64, so a non-safe secret is deterministically
+        hashed instead of rejected. Existing URL-safe secrets are kept as-is.
+        """
+        secret = self.webhook_secret
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,256}", secret):
+            return secret
+        digest = hashlib.sha256(secret.encode("utf-8")).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value: object) -> object:
+        """Accept Render/Neon/libpq URLs and convert them for asyncpg.
+
+        SQLAlchemy passes URL query parameters to ``asyncpg.connect()`` as
+        keyword arguments, and asyncpg expects TLS in ``ssl`` (not libpq's
+        ``sslmode``). Neon also adds ``channel_binding`` and sometimes
+        ``pgbouncer``, which asyncpg would treat as server settings.
+        """
+        if not isinstance(value, str) or not value:
+            return value
+        if value.startswith("postgres://"):
+            value = "postgresql+asyncpg://" + value[len("postgres://") :]
+        elif value.startswith("postgresql://"):
+            value = "postgresql+asyncpg://" + value[len("postgresql://") :]
+        if not value.startswith("postgresql+asyncpg://"):
+            return value
+        parts = urlsplit(value)
+        query = []
+        for key, item in parse_qsl(parts.query, keep_blank_values=True):
+            if key in {"channel_binding", "pgbouncer"}:
+                continue
+            if key == "sslmode":
+                key = "ssl"
+            query.append((key, item))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        )
+
+    @property
     def assets_path(self) -> Path:
         path = Path(self.assets_dir)
         if not path.is_absolute():
@@ -97,6 +148,18 @@ class Settings(BaseSettings):
     def validate_production(self) -> Settings:
         if not self.is_prod:
             return self
+
+        # Render provides the public HTTPS origin at runtime. Use it unless the
+        # operator set explicit URLs (for example, a custom domain).
+        render_url = self.render_external_url.rstrip("/")
+        if render_url.startswith("https://"):
+            if not self.public_base_url or self.public_base_url.startswith(
+                "http://localhost"
+            ):
+                self.public_base_url = render_url
+            if not self.webhook_base_url:
+                self.webhook_base_url = render_url
+
         placeholder_prefixes = (
             "change-me",
             "replace-with",
@@ -120,6 +183,14 @@ class Settings(BaseSettings):
             raise ValueError("DEBUG and DEV_PAYMENTS_ENABLED must be false in production")
         if self.ai_provider == "mock":
             raise ValueError("AI_PROVIDER=mock is not allowed in production")
+        if self.ai_provider in {"openai", "cloudflare"} and not self.ai_api_key:
+            raise ValueError(
+                "AI_API_KEY is required when AI_PROVIDER is openai or cloudflare"
+            )
+        if self.ai_provider == "cloudflare" and not self.cloudflare_account_id:
+            raise ValueError(
+                "CLOUDFLARE_ACCOUNT_ID is required when AI_PROVIDER=cloudflare"
+            )
         if self.bot_mode not in {"webhook", "polling"}:
             raise ValueError("BOT_MODE must be webhook or polling")
         if self.bot_mode == "polling" and not self.allow_prod_polling:
@@ -134,6 +205,9 @@ class Settings(BaseSettings):
             raise ValueError("FRONTEND_URL must be an HTTPS URL in production")
         if not self.public_base_url.startswith("https://"):
             raise ValueError("PUBLIC_BASE_URL must be an HTTPS URL in production")
+        allowed_origins = {origin.rstrip("/") for origin in self.cors_origin_list}
+        if self.frontend_url.rstrip("/") not in allowed_origins:
+            raise ValueError("CORS_ORIGINS must include FRONTEND_URL in production")
         return self
 
 

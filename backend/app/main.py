@@ -4,7 +4,6 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
-import sentry_sdk
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -21,7 +20,9 @@ from app.core.config import settings
 from app.core.db import create_all, engine
 from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger
+from app.core.monitoring import capture_exception, init_sentry, should_alert
 from app.core.security import SecurityError
+from app.services import notifications
 
 WEBHOOK_RETRY_DELAYS = (5, 10, 20, 40, 60, 60)
 
@@ -32,7 +33,7 @@ async def _set_webhook_and_commands(
     await bot.set_webhook(
         url,
         allowed_updates=dp.resolve_used_update_types(),
-        secret_token=settings.webhook_secret,
+        secret_token=settings.telegram_webhook_secret,
         drop_pending_updates=False,
     )
     logger.info("webhook_set", url=url)
@@ -51,17 +52,24 @@ async def _retry_webhook_setup(
             await _set_webhook_and_commands(bot, dp, url, logger)
             logger.info("webhook_setup_recovered")
             return
-        except TelegramNetworkError as exc:
+        except Exception as exc:
+            # Includes TelegramUnauthorizedError for a bad token and network
+            # errors during cold start. Keep retrying, then alert the owner.
             logger.warning("webhook_setup_retry", delay=delay, error=str(exc))
     logger.error("webhook_setup_failed", url=url)
+    await notifications.notify_admins(
+        bot,
+        "❌ <b>Не удалось установить webhook Telegram</b>\n\n"
+        f"URL: <code>{url}</code>\n"
+        "Проверьте BOT_TOKEN, WEBHOOK_SECRET и доступность API.",
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     logger = get_logger("startup")
-    if settings.sentry_dsn:
-        sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.1)
+    init_sentry()
 
     if settings.auto_create_tables and not settings.is_prod:
         await create_all()
@@ -89,6 +97,7 @@ async def lifespan(app: FastAPI):
     bot: Bot | None = None
     dp = None
     webhook_task: asyncio.Task[None] | None = None
+    maintenance_task: asyncio.Task[None] | None = None
     if settings.bot_token:
         bot = Bot(
             token=settings.bot_token,
@@ -120,14 +129,31 @@ async def lifespan(app: FastAPI):
                 _retry_webhook_setup(bot, dp, url, logger)
             )
 
+    if settings.is_prod and bot is not None:
+        await notifications.notify_admins(
+            bot,
+            "✅ <b>Tezis API запущен</b>\n\n"
+            f"Режим бота: <code>{settings.bot_mode}</code>\n"
+            f"Окружение: <code>{settings.app_env}</code>",
+        )
+
+    if settings.maintenance_enabled:
+        # Imported lazily so local/dev runs do not import the ARQ worker unless
+        # they actually use the in-process scheduler.
+        from app.maintenance import run_forever
+
+        maintenance_task = asyncio.create_task(run_forever())
+        logger.info("maintenance_started")
+
     try:
         yield
     finally:
-        if webhook_task is not None:
-            webhook_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await webhook_task
-        pending = tuple(app.state.webhook_tasks)
+        for task in (webhook_task, maintenance_task):
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+        pending = tuple(app.state.webhook_tasks) + tuple(app.state.alert_tasks)
         for task in pending:
             task.cancel()
         if pending:
@@ -149,6 +175,7 @@ app = FastAPI(
 )
 
 app.state.webhook_tasks = set()
+app.state.alert_tasks = set()
 
 app.add_middleware(
     CORSMiddleware,
@@ -194,6 +221,20 @@ async def validation_error_handler(
 @app.exception_handler(Exception)
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     get_logger("errors").exception("unhandled_error", path=request.url.path)
+    capture_exception(exc)
+    if should_alert("unhandled_error"):
+        bot = getattr(request.app.state, "bot", None)
+        if bot is not None:
+            task = asyncio.create_task(
+                notifications.notify_admins(
+                    bot,
+                    "❗️ <b>Необработанная ошибка API</b>\n\n"
+                    f"Путь: <code>{request.url.path}</code>\n"
+                    f"Тип: <code>{type(exc).__name__}</code>",
+                )
+            )
+            request.app.state.alert_tasks.add(task)
+            task.add_done_callback(request.app.state.alert_tasks.discard)
     return JSONResponse(
         status_code=500,
         content={"error": "internal_error", "message": "Внутренняя ошибка сервера"},
