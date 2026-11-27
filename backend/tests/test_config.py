@@ -45,6 +45,7 @@ def _prod_settings(**overrides: object) -> Settings:
         "app_env": "prod",
         "debug": False,
         "dev_payments_enabled": False,
+        "database_url": "postgresql+asyncpg://user:pass@host/db",
         "secret_key": "unit-test-secret-key",
         "jwt_secret": "unit-test-jwt-secret",
         "webhook_secret": "unit-test-webhook-secret",
@@ -104,3 +105,8 @@ def test_serverless_production_requires_cron_secret() -> None:
             vercel_url="tezis-studio.vercel.app",
             cron_secret="",
         )
+
+
+def test_production_rejects_sqlite_database_url() -> None:
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        _prod_settings(database_url="sqlite+aiosqlite:///./tezis.db")

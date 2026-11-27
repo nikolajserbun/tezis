@@ -198,6 +198,9 @@ class Settings(BaseSettings):
             ):
                 self.cors_origins = vercel_origin
 
+        if self.database_url.startswith("sqlite"):
+            raise ValueError("DATABASE_URL must be PostgreSQL in production")
+
         placeholder_prefixes = (
             "change-me",
             "replace-with",
