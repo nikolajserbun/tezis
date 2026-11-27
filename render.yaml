@@ -4,8 +4,9 @@
 #   - API + Telegram webhook (free web service)
 #   - Mini App / admin / landing (free static site)
 #   - Redis-compatible FSM/rate-limit store (free Key Value)
-#   - PostgreSQL is external (Neon free), because Render's free Postgres
-#     expires after 30 days. Put its URL into DATABASE_URL when Render asks.
+#   - PostgreSQL is external (Neon or Supabase free), because Render's free
+#     Postgres expires after 30 days. Put its URL into DATABASE_URL when
+#     Render asks. For Supabase use the IPv4 "Session pooler" string.
 #
 # Scheduled jobs run inside the API process (MAINTENANCE_ENABLED=true), so no
 # paid background worker is required. If the free web service is asleep, the
@@ -63,7 +64,7 @@ services:
 
       # Data stores
       - key: DATABASE_URL
-        sync: false # Neon: postgresql://...?sslmode=require
+        sync: false # Neon direct or Supabase session pooler: postgresql://...?sslmode=require
       - key: REDIS_URL
         fromService:
           type: keyvalue

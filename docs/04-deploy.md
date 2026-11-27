@@ -81,20 +81,33 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 | API + Telegram webhook | Free Web Service | $0 |
 | Mini App, админка, лендинг | Free Static Site | $0 |
 | FSM и rate limit | Free Key Value (25 МБ) | $0 |
-| PostgreSQL | Neon Free (внешняя БД) | $0 |
-| Ошибки | Sentry Free | $0 |
+| PostgreSQL | Внешняя бесплатная БД (Neon или Supabase) | $0 |
+| Ошибки | Sentry или совместимый сервис | $0 |
 | Cron-задачи | внутри API (`MAINTENANCE_ENABLED=true`) | $0 |
 
-Почему не Render Postgres: бесплатная база Render удаляется через 30 дней. Поэтому база — Neon Free (0,5 ГБ, постоянная, с авто-засыпанием). Бесплатный web service Render засыпает после 15 минут без запросов; Telegram webhook будит его, но первый ответ может занять до минуты. Workflow `.github/workflows/keepalive.yml` пингует health каждые 10 минут, чтобы бот оставался активным.
+Почему не Render Postgres: бесплатная база Render удаляется через 30 дней. Поэтому база внешняя. Бесплатный web service Render засыпает после 15 минут без запросов; Telegram webhook будит его, но первый ответ может занять до минуты. Workflow `.github/workflows/keepalive.yml` пингует health каждые 10 минут, чтобы бот оставался активным.
 
-### 0.3.2. Neon
+### 0.3.2. Внешняя PostgreSQL
 
-1. Зарегистрируйтесь на [neon.tech](https://neon.tech) и создайте проект в регионе Frankfurt (`eu-central-1`).
-2. Скопируйте **direct** connection string (не `-pooler`), вид:
+**Вариант А — Neon Free.** Если `neon.tech` открывается из вашего региона:
+
+1. Создайте проект в регионе Frankfurt (`eu-central-1`).
+2. Скопируйте **direct** connection string (не `-pooler`):
    `postgresql://USER:PASSWORD@ep-...eu-central-1.aws.neon.tech/neondb?sslmode=require`
-3. Никому не отправляйте эту строку: в ней пароль. Она понадобится только в Render.
+3. Строку никому не отправляйте: в ней пароль.
 
-Приложение само приводит `postgresql://` к `postgresql+asyncpg://` и убирает параметры `channel_binding`/`pgbouncer`, которые не понимает asyncpg. `sslmode=require` сохраняется.
+**Вариант Б — Supabase Free.** Проверено: `neon.tech` и `sentry.io` могут быть заблокированы по региону, а `supabase.com` и `render.com` доступны. Если Neon не открывается:
+
+1. Создайте проект на [supabase.com](https://supabase.com) в регионе `eu-central-1` (Frankfurt).
+2. **Connect → Session pooler** (IPv4; бесплатный direct-адрес Supabase — IPv6-only и может не подойти Render).
+3. Скопируйте строку вида
+   `postgresql://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require`
+   и замените `[PASSWORD]` на пароль базы (он показывается только при создании проекта).
+4. Session pooler поддерживает prepared statements, поэтому `statement_cache_size=0` не нужен.
+
+**Крайняя мера** — Render Postgres free: подойдёт для проверки, но удаляется через 30 дней.
+
+Приложение само приводит `postgresql://` к `postgresql+asyncpg://`, переводит `sslmode=require` в `ssl=require` и убирает `channel_binding`/`pgbouncer`, которые не понимает asyncpg.
 
 ### 0.3.3. Blueprint в Render
 
@@ -108,7 +121,7 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 
 | Переменная | Что ввести |
 | --- | --- |
-| `DATABASE_URL` | строка Neon из 0.3.2 |
+| `DATABASE_URL` | строка Neon/Supabase из 0.3.2 |
 | `BOT_TOKEN` | токен от @BotFather |
 | `OWNER_TG_ID` | ваш Telegram ID, например `1894774240` |
 | `ADMIN_CHAT_ID` | ваш Telegram ID для алертов (можно тот же); `0` — без алертов |
@@ -138,20 +151,24 @@ docker compose -p tezis -f docker-compose.yml -f docker-compose.prod.yml up -d -
 
 ### 0.3.5. Перенос текущих данных (необязательно)
 
-Если нужны текущие пользователи, товары и история, а не только базовые данные:
+Готовый дамп уже лежит в `backups/render_migration.sql` (проверен импортом в чистую PostgreSQL 16: `users=5`, `products=9`, `usage_events=25`, заказов `0`). Он не содержит прав, владельцев и команд `\restrict`, поэтому подходит для Neon и Supabase.
+
+Импорт (строку подключения подставьте свою, никому её не отправляйте):
+
+```powershell
+docker run --rm -v "${PWD}\backups:/backups" postgres:16-alpine `
+  psql "postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require" `
+  -v ON_ERROR_STOP=1 -f /backups/render_migration.sql
+```
+
+Если дамп нужно создать заново:
 
 ```bash
-# 1. Дамп локальной базы без владельцев и прав
 docker compose -p tezis up -d postgres
 docker compose -p tezis exec -T postgres \
   pg_dump -U tezis -d tezis --no-owner --no-privileges --clean --if-exists \
   > backups/render_migration.sql
 docker compose -p tezis stop postgres
-
-# 2. Импорт в Neon (PowerShell; строку подключения подставьте свою)
-docker run --rm -v "${PWD}/backups:/backups" postgres:16 \
-  psql "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require" \
-  -v ON_ERROR_STOP=1 -f /backups/render_migration.sql
 ```
 
 В дампе есть `alembic_version`, поэтому повторный `alembic upgrade head` при старте будет безопасным. После импорта перезапустите API: **Manual Deploy → Deploy latest commit** (или дождитесь следующего пуша).
@@ -160,7 +177,7 @@ docker run --rm -v "${PWD}/backups:/backups" postgres:16 \
 
 ### 0.3.6. Sentry и Telegram-алерты
 
-- Sentry: создайте проект Python/FastAPI на [sentry.io](https://sentry.io), скопируйте DSN в `SENTRY_DSN`. Ошибки API и worker попадут в Sentry; бесплатный лимит — 5 000 событий/мес.
+- Sentry: создайте проект Python/FastAPI на [sentry.io](https://sentry.io), скопируйте DSN в `SENTRY_DSN`. Ошибки API и worker попадут в Sentry; бесплатный лимит — 5 000 событий/мес. Если `sentry.io` заблокирован в вашем регионе, оставьте `SENTRY_DSN` пустым — Telegram-алерты и логи Render продолжают работать. DSN совместимого [GlitchTip](https://glitchtip.com/) (бесплатно 1 000 событий/мес) также можно вставить сюда: Sentry SDK принимает его.
 - Telegram: `ADMIN_CHAT_ID` должен быть вашим ID (или ID группы, куда добавлен бот). Алерты приходят при:
   - запуске API (в том числе после выхода free-инстанса из сна);
   - неудачной установке webhook;
