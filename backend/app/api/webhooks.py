@@ -8,7 +8,7 @@ from aiogram.types import Update
 from fastapi import APIRouter, Header, Request
 
 from app.core.config import settings
-from app.core.errors import Forbidden, ServiceUnavailable
+from app.core.errors import Forbidden, ServiceUnavailable, ValidationError
 from app.core.logging import get_logger
 from app.core.monitoring import capture_exception, should_alert
 from app.services import notifications
@@ -26,13 +26,17 @@ def _secret_is_valid(candidate: str | None) -> bool:
     )
 
 
-async def _process_update(bot: Bot, dp: Dispatcher, update: Update) -> None:
+async def _process_update(
+    bot: Bot, dp: Dispatcher, update: Update, *, propagate: bool = False
+) -> None:
     try:
         await dp.feed_update(bot, update)
     except Exception as exc:
-        # Telegram retries non-2xx responses. Report the failure to the
-        # owner and keep it in logs/Sentry; the webhook already returned 200
-        # so a transient handler error does not cause a retry storm.
+        # Log and alert first. On serverless the caller must answer non-2xx so
+        # Telegram retries: the function is frozen after the response and no
+        # background job can recover a failed payment/order update. A long-
+        # running server keeps the old fire-and-forget behaviour to avoid a
+        # retry storm on transient handler errors.
         logger.exception("webhook_processing_failed", error=str(exc))
         capture_exception(exc)
         if should_alert("webhook_processing"):
@@ -45,6 +49,8 @@ async def _process_update(bot: Bot, dp: Dispatcher, update: Update) -> None:
                 )
             except Exception as notify_exc:
                 logger.exception("webhook_alert_failed", error=str(notify_exc))
+        if propagate:
+            raise
 
 
 @router.post("/telegram")
@@ -77,13 +83,21 @@ async def telegram_webhook(
         payload = await request.json()
         update = Update.model_validate(payload)
     except Exception as exc:
-        logger.exception("webhook_processing_failed", error=str(exc))
-        return {"ok": True}
+        logger.exception("webhook_payload_invalid", error=str(exc))
+        raise ValidationError("Некорректный Telegram update") from exc
 
     if settings.is_serverless:
         # Vercel freezes the instance as soon as the response is sent, so the
-        # bot must finish before Telegram receives the 200.
-        await _process_update(bot, dp, update)
+        # bot must finish before Telegram receives the 200, and any failure
+        # must be visible to Telegram as a non-2xx response.
+        try:
+            await _process_update(bot, dp, update, propagate=True)
+        except Exception as exc:
+            # AppError is handled without re-raising, so Telegram receives a
+            # clean 503 and will retry the update.
+            raise ServiceUnavailable(
+                "Не удалось обработать обновление Telegram"
+            ) from exc
         return {"ok": True}
 
     task = asyncio.create_task(_process_update(bot, dp, update))

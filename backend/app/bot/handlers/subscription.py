@@ -22,20 +22,27 @@ async def sub_view(
     await callback.answer()
     usage = await subscriptions.usage(session, user)
     if usage.has_subscription:
+        reset = (
+            f"Обновление: {usage.resets_at:%d.%m.%Y}"
+            if usage.resets_at
+            else "Обновление после окончания подписки"
+        )
         text = (
             "💎 <b>Ваша подписка</b>\n\n"
             f"Тариф: <b>{usage.plan_title}</b>\n"
-            f"Генерации: {usage.generations_used}/{usage.generations_limit} "
-            f"(осталось {usage.generations_left})\n"
+            f"Neurons: {usage.neurons_used:g}/{usage.neurons_limit:g} "
+            f"(осталось {usage.neurons_left:g})\n"
+            f"{reset}\n"
             f"Действует до: {usage.expires_at:%d.%m.%Y}\n\n"
-            "Продление добавляет новый период и лимит генераций."
+            "Лимит Neurons пополняется каждую неделю, пока подписка активна."
         )
     else:
         text = (
             "💎 <b>Подписка</b>\n\n"
             f"Сейчас у вас тариф Free. Осталось бесплатных Neurons: "
             f"<b>{usage.neurons_left:g}</b> из {usage.neurons_limit:g}.\n\n"
-            "Подписка снимает лимит Neurons и открывает контент-план, адаптации и историю."
+            "Бесплатные Neurons не обновляются. Подписка даёт еженедельное пополнение "
+            "и открывает контент-план, адаптации и историю."
         )
     if callback.message:
         await edit_message(callback, 
@@ -60,12 +67,16 @@ async def sub_plans(
     lines = [
         "💎 <b>Тарифы «Тезис»</b>",
         "",
-        "Free — 500 Neurons, чтобы попробовать.",
-        "Start — 200 ₽/мес · 15 генераций · 1 бренд.",
-        "Pro — 499 ₽/мес · 50 генераций · 5 брендов.",
-        "Studio — 999 ₽/мес · 120 генераций · 15 брендов.",
+        "Free — 500 Neurons один раз, без обновления.",
+    ]
+    for product in products:
+        lines.append(
+            f"• {product.title} — {product.neurons_per_week:g} Neurons/неделю, "
+            f"{product.brand_limit} бренд(а)."
+        )
+    lines += [
         "",
-        "При оплате на год — скидка 20%.",
+        "Neurons пополняются каждую неделю, пока подписка активна.",
         "Выберите тариф, чтобы посмотреть детали и оплатить Stars.",
     ]
     if callback.message:
@@ -99,7 +110,7 @@ async def cmd_subscription(
         text = (
             "💎 <b>Подписка</b>\n\n"
             f"Тариф: <b>{usage.plan_title}</b>\n"
-            f"Осталось генераций: {usage.generations_left}\n"
+            f"Осталось Neurons: {usage.neurons_left:g} из {usage.neurons_limit:g}\n"
             f"Действует до: {usage.expires_at:%d.%m.%Y}"
         )
     else:

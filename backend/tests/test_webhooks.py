@@ -130,6 +130,24 @@ async def test_webhook_acks_before_handler_finishes(client) -> None:
         await _drain_webhook_tasks()
 
 
+async def test_webhook_retries_on_handler_failure_in_serverless(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "vercel", "1")
+    app.state.dp = StubDispatcher(fail=True)
+    app.state.bot = object()
+
+    response = await client.post(
+        "/api/v1/webhooks/telegram",
+        json=UPDATE,
+        headers={"X-Telegram-Bot-Api-Secret-Token": settings.webhook_secret},
+    )
+
+    # Telegram must see non-2xx to retry: inline processing is the only chance
+    # to finish a payment/order update before the serverless function freezes.
+    assert response.status_code == 503
+
+
 async def test_webhook_waits_for_handler_in_serverless(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:

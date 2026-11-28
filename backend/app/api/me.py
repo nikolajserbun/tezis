@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, rate_limit
 from app.core.db import get_session
 from app.core.errors import NotFound
+from app.core.text import esc
 from app.models import BrandProfile, Payout, User
 from app.schemas import (
     AdaptIn,
@@ -74,7 +75,7 @@ async def update_brand(
     if brand is None:
         brand = BrandProfile(user_id=user.id)
         session.add(brand)
-    for field, value in payload.model_dump().items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(brand, field, value)
     await session.commit()
     await session.refresh(brand)
@@ -108,6 +109,9 @@ async def my_subscription(
         return None
     result = SubscriptionOut.model_validate(sub)
     result.product_title = sub.product.title if sub.product else None
+    result.neurons_used, result.neurons_limit = (
+        await subscriptions.subscription_neuron_usage(session, sub)
+    )
     return result
 
 
@@ -219,7 +223,6 @@ async def chat_ask(
     answer = await chat.ask(
         session,
         user=user,
-        brand=await _brand(session, user),
         message=payload.message,
         web_search=payload.web_search,
     )
@@ -230,7 +233,6 @@ async def chat_ask(
         demo_mode=answer.demo_mode,
         tokens=answer.tokens,
         cost_minor=answer.cost_minor,
-        generations_left=answer.generations_left,
         neurons_left=answer.neurons_left,
         created_at=answer.message.created_at,
     )
@@ -269,9 +271,9 @@ async def request_payout(
     await notifications.notify_admins(
         request.app.state.bot,
         "💸 <b>Новая заявка на выплату</b>\n\n"
-        f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)\n"
+        f"Пользователь: {esc(user.display_name)} (<code>{user.tg_id}</code>)\n"
         f"Сумма: {payout.amount_minor / 100:.0f} ₽\n"
-        f"Реквизиты: {payout.requisites}\n"
+        f"Реквизиты: {esc(payout.requisites)}\n"
         f"ID заявки: <code>{payout.id}</code>",
     )
     return PayoutOut.model_validate(payout)
@@ -308,9 +310,9 @@ async def create_support_ticket(
     await notifications.notify_admins(
         request.app.state.bot,
         "🆘 <b>Новое обращение</b>\n\n"
-        f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)\n"
-        f"Тема: {ticket.subject}\n"
-        f"Текст: {payload.message[:800]}\n"
+        f"Пользователь: {esc(user.display_name)} (<code>{user.tg_id}</code>)\n"
+        f"Тема: {esc(ticket.subject)}\n"
+        f"Текст: {esc(payload.message[:800])}\n"
         f"ID: <code>{ticket.id}</code>",
     )
     return SupportTicketOut.model_validate(ticket)

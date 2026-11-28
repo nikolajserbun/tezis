@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,9 +38,7 @@ def parse_invoice_payload(payload: str) -> UUID:
 
 
 async def _activate_order(session: AsyncSession, order: Order) -> Order:
-    order.status = OrderStatus.PAID.value
-    order.paid_at = utcnow()
-
+    """Grant entitlements after the caller has atomically claimed the order."""
     for item in order.items:
         if item.kind == "subscription" and item.product_id is not None:
             product = await session.get(Product, item.product_id)
@@ -89,6 +87,24 @@ async def confirm_stars_payment(
     if amount_stars != order.total_stars:
         raise PaymentError("Сумма платежа не совпадает с заказом")
 
+    # Claim the order atomically. Two different charge IDs can arrive for the
+    # same order; only the first pending->paid transition may grant a plan.
+    claim = await session.execute(
+        update(Order)
+        .where(
+            Order.id == order.id,
+            Order.status == OrderStatus.PENDING.value,
+        )
+        .values(status=OrderStatus.PAID.value, paid_at=utcnow())
+        .execution_options(synchronize_session="fetch")
+    )
+    if int(getattr(claim, "rowcount", 0) or 0) != 1:
+        current = await orders.get_order(session, order.id)
+        existing_charge = await get_payment_by_charge(session, charge_id)
+        if existing_charge is not None and existing_charge.order_id != current.id:
+            raise PaymentError("Этот платёж уже используется другим заказом")
+        return current, False
+
     payment = Payment(
         order_id=order.id,
         user_id=order.user_id,
@@ -108,11 +124,15 @@ async def confirm_stars_payment(
     try:
         await session.flush()
     except IntegrityError as exc:
-        # Two webhooks can arrive at the same time. The unique charge ID lets
-        # the loser recognize the winner instead of returning HTTP 500.
+        # Same charge ID delivered twice: the unique constraint picks a winner
+        # without leaving a second paid order behind.
         await session.rollback()
         existing = await get_payment_by_charge(session, charge_id)
-        if existing is not None and existing.order_id == order.id:
+        if (
+            existing is not None
+            and existing.order_id == order.id
+            and existing.status == PaymentStatus.SUCCEEDED.value
+        ):
             return await orders.get_order(session, order.id), False
         raise PaymentError("Не удалось подтвердить платёж, попробуйте позже") from exc
 
@@ -146,6 +166,18 @@ async def confirm_manual_payment(
         status=PaymentStatus.SUCCEEDED.value,
         payload={"admin_id": str(admin.id) if admin else None},
     )
+    claim = await session.execute(
+        update(Order)
+        .where(
+            Order.id == order.id,
+            Order.status == OrderStatus.PENDING.value,
+        )
+        .values(status=OrderStatus.PAID.value, paid_at=utcnow())
+        .execution_options(synchronize_session="fetch")
+    )
+    if int(getattr(claim, "rowcount", 0) or 0) != 1:
+        return await orders.get_order(session, order.id)
+
     session.add(payment)
     await _activate_order(session, order)
     await session.commit()

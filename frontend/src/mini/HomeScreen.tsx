@@ -1,5 +1,5 @@
 import { Badge, EmptyState, ErrorState, PageHeader, Spinner } from '../components/ui'
-import { date, neurons, plural } from '../lib/format'
+import { date, neurons } from '../lib/format'
 import type { Subscription } from '../lib/api'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle } from './parts'
@@ -45,13 +45,11 @@ export function HomeScreen() {
   const { usage, user } = me
   const subscription = useMiniApi<Subscription | null>('/api/v1/me/subscription', [ordersVersion])
 
-  const neuronLimited = usage.neurons_limit > 0
-  const limit = neuronLimited ? usage.neurons_limit : usage.generations_limit
-  const used = neuronLimited ? usage.neurons_used : usage.generations_used
-  const left = neuronLimited ? usage.neurons_left : usage.generations_left
+  const limit = usage.neurons_limit
+  const used = usage.neurons_used
+  const left = usage.neurons_left
   const progress = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
   const firstName = user.first_name?.trim() || 'друг'
-  const leftLabel = plural(left, ['генерация', 'генерации', 'генераций'])
 
   return (
     <div className="space-y-6">
@@ -74,23 +72,20 @@ export function HomeScreen() {
 
         <div className="mt-5 flex items-end justify-between gap-3">
           <p className="mini-hero-value font-display text-3xl font-semibold text-ink-900">
-            {neuronLimited ? neurons(left) : left}
-            {!neuronLimited && (
-              <span className="ml-2 text-sm font-sans font-normal text-ink-500">{leftLabel}</span>
-            )}
+            {neurons(left)}
+            <span className="ml-2 text-sm font-sans font-normal text-ink-500">Neurons</span>
           </p>
           <p className="hint">
-            Использовано {neuronLimited ? neurons(used) : used} из{' '}
-            {neuronLimited ? neurons(limit) : limit}
+            Использовано {neurons(used)} из {neurons(limit)}
           </p>
         </div>
         <div className="mini-progress mt-3 h-2 overflow-hidden rounded-full bg-ink-100">
           <span style={{ width: `${progress}%` }} />
         </div>
         <p className="hint mt-3">
-          {usage.has_subscription && usage.expires_at && !neuronLimited
-            ? `Подписка активна до ${date(usage.expires_at)}`
-            : `Лимит Neurons: ${neurons(usage.neurons_left)} из ${neurons(usage.neurons_limit)}`}
+          {usage.resets_at
+            ? `Обновление ${date(usage.resets_at)} · подписка до ${date(usage.expires_at)}`
+            : 'Бесплатные Neurons не обновляются — оформите подписку для еженедельного пополнения'}
         </p>
       </section>
 
@@ -150,9 +145,9 @@ export function HomeScreen() {
               <Badge value={subscription.data.status} />
             </div>
             <div className="mt-4 flex items-center justify-between border-t border-ink-100 pt-4 text-sm">
-              <span className="text-ink-500">Генераций в периоде</span>
+              <span className="text-ink-500">Neurons на неделю</span>
               <span className="font-medium text-ink-900">
-                {subscription.data.generations_used} / {subscription.data.generations_limit}
+                {neurons(subscription.data.neurons_used)} / {neurons(subscription.data.neurons_limit)}
               </span>
             </div>
             {subscription.data.auto_renew && (

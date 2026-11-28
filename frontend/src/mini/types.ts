@@ -2,6 +2,8 @@ export interface Config {
   app_name: string
   bot_username: string
   app_env: string
+  dev_features_enabled?: boolean
+  dev_payments_enabled?: boolean
 }
 
 export type Tab = 'home' | 'studio' | 'chat' | 'shop' | 'orders' | 'profile'

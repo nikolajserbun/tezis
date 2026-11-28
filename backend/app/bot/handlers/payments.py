@@ -147,7 +147,7 @@ async def pay_stars(
 async def pay_dev(
     callback: CallbackQuery, session: AsyncSession, user: User
 ) -> None:
-    if settings.is_prod or not settings.dev_payments_enabled:
+    if not settings.dev_payments_allowed:
         await callback.answer("Тестовая оплата отключена", show_alert=True)
         return
     await callback.answer()

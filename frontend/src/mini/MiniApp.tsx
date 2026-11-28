@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toast } from '../components/ui'
 import { ApiError, apiRequest, getToken, setToken, useApi } from '../lib/api'
 import type { Me, TokenResponse } from '../lib/api'
-import { neurons, plural } from '../lib/format'
+import { neurons } from '../lib/format'
 import { MiniContext } from './context'
 import type { MiniContextValue, MiniRequestOptions } from './context'
 import { HomeScreen } from './HomeScreen'
@@ -48,6 +48,8 @@ export default function MiniApp() {
     app_name: 'Тезис',
     bot_username: '',
     app_env: 'dev',
+    dev_features_enabled: true,
+    dev_payments_enabled: true,
   }
   const tab = history[history.length - 1]
   const hasTelegramInitData = Boolean(getInitData())
@@ -56,13 +58,14 @@ export default function MiniApp() {
   const dismissToast = useCallback((): void => setToast(''), [])
 
   const signOut = useCallback((): void => {
+    meQuery.setData(null)
     setToken(null)
     setAuthState('guest')
     setAuthMessage(null)
     setSessionKey((value) => value + 1)
     setHistory(['home'])
     setFocus(null)
-  }, [])
+  }, [meQuery.setData])
 
   const handleApiError = useCallback(
     (error: unknown): void => {
@@ -129,6 +132,7 @@ export default function MiniApp() {
         body: { init_data: initData },
         auth: false,
       })
+      meQuery.setData(null)
       setToken(response.access_token)
       setAuthState('ready')
       setAuthMessage(null)
@@ -139,7 +143,7 @@ export default function MiniApp() {
       setAuthMessage(error instanceof Error ? error.message : 'Не удалось войти через Telegram')
       setAuthState('guest')
     }
-  }, [handleApiError])
+  }, [handleApiError, meQuery.setData])
 
   const devLogin = useCallback(
     async (email: string, password: string): Promise<void> => {
@@ -150,6 +154,7 @@ export default function MiniApp() {
           body: { email, password },
           auth: false,
         })
+        meQuery.setData(null)
         setToken(response.access_token)
         setAuthState('ready')
         setAuthMessage(null)
@@ -159,7 +164,7 @@ export default function MiniApp() {
         handleApiError(error)
       }
     },
-    [handleApiError, notify],
+    [handleApiError, meQuery.setData, notify],
   )
 
   useEffect(() => {
@@ -249,16 +254,7 @@ export default function MiniApp() {
                 <p className="text-xs font-medium text-ink-900">
                   {me.usage.plan_title || 'Бесплатный доступ'}
                 </p>
-                <p className="hint">
-                  {me.usage.neurons_limit > 0 ? (
-                    <>Осталось {neurons(me.usage.neurons_left)}</>
-                  ) : (
-                    <>
-                      Осталось {me.usage.generations_left}{' '}
-                      {plural(me.usage.generations_left, ['генерация', 'генерации', 'генераций'])}
-                    </>
-                  )}
-                </p>
+                <p className="hint">Осталось {neurons(me.usage.neurons_left)} Neurons</p>
               </div>
             </div>
           </header>

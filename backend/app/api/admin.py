@@ -15,7 +15,8 @@ from app.api.deps import (
 )
 from app.core.db import SessionLocal, get_session
 from app.core.errors import NotFound, ServiceUnavailable, ValidationError
-from app.core.utils import rub_to_stars
+from app.core.text import esc
+from app.core.utils import aware, rub_to_stars
 from app.models import (
     AuditLog,
     Broadcast,
@@ -46,6 +47,7 @@ from app.schemas import (
     SettingOut,
     SettingsUpdateIn,
     SubscriptionOut,
+    SubscriptionUpdateIn,
     SupportReplyIn,
     SupportTicketOut,
     UserOut,
@@ -71,9 +73,12 @@ from app.services import (
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _sub_out(sub: Subscription) -> SubscriptionOut:
+async def _sub_out(session: AsyncSession, sub: Subscription) -> SubscriptionOut:
     result = SubscriptionOut.model_validate(sub)
     result.product_title = sub.product.title if sub.product else None
+    result.neurons_used, result.neurons_limit = (
+        await subscriptions.subscription_neuron_usage(session, sub)
+    )
     return result
 
 
@@ -149,8 +154,6 @@ async def update_user(
         raise NotFound("Пользователь не найден")
 
     fields = payload.model_fields_set
-    if "generations_bonus" in fields and payload.generations_bonus is not None:
-        user.generations_bonus = payload.generations_bonus
     if "neurons_bonus" in fields and payload.neurons_bonus is not None:
         user.neurons_bonus = payload.neurons_bonus
     if "neurons_limit_override" in fields:
@@ -196,7 +199,7 @@ async def user_subscriptions(
         .order_by(Subscription.created_at.desc())
     )
     rows = list((await session.scalars(stmt)).all())
-    return [_sub_out(row) for row in rows]
+    return [await _sub_out(session, row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +238,13 @@ async def create_product(
     data = payload.model_dump()
     if data["price_stars"] is None:
         data["price_stars"] = rub_to_stars(data["price_minor"])
-    if data["kind"] == "subscription" and not data["duration_days"]:
-        data["duration_days"] = 30
+    if data["kind"] == "subscription":
+        if not data["duration_days"]:
+            data["duration_days"] = 30
+        if not data["neurons_per_week"] or data["neurons_per_week"] <= 0:
+            raise ValidationError("Укажите Neurons в неделю для подписки")
+    elif data["neurons_per_week"]:
+        data["neurons_per_week"] = 0.0
     product = Product(**data)
     session.add(product)
     await session.commit()
@@ -264,8 +272,18 @@ async def update_product(
     product = await session.get(Product, product_id)
     if product is None:
         raise NotFound("Товар не найден")
+    nullable_fields = {
+        "price_stars",
+        "duration_days",
+        "file_key",
+        "cover_url",
+    }
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if value is None and field not in nullable_fields:
+            raise ValidationError(f"Поле {field} не может быть null")
         setattr(product, field, value)
+    if product.is_subscription and product.neurons_per_week <= 0:
+        raise ValidationError("Укажите Neurons в неделю для подписки")
     await session.commit()
     await audit.log_action(
         session,
@@ -429,7 +447,7 @@ async def list_subscriptions(
     if status:
         stmt = stmt.where(Subscription.status == status)
     rows = list((await session.scalars(stmt)).all())
-    return [_sub_out(row) for row in rows]
+    return [await _sub_out(session, row) for row in rows]
 
 
 @router.post("/subscriptions/{subscription_id}/cancel", response_model=SubscriptionOut)
@@ -461,7 +479,47 @@ async def cancel_subscription(
         entity_id=str(sub.id),
         ip=client_ip(request),
     )
-    return _sub_out(sub)
+    return await _sub_out(session, sub)
+
+
+@router.patch("/subscriptions/{subscription_id}", response_model=SubscriptionOut)
+async def update_subscription(
+    subscription_id: UUID,
+    payload: SubscriptionUpdateIn,
+    request: Request,
+    actor: User = Depends(require_admin()),
+    session: AsyncSession = Depends(get_session),
+) -> SubscriptionOut:
+    """Adjust one subscription's weekly allowance or end date."""
+    stmt = (
+        select(Subscription)
+        .options(selectinload(Subscription.product))
+        .where(Subscription.id == subscription_id)
+    )
+    sub = await session.scalar(stmt)
+    if sub is None:
+        raise NotFound("Подписка не найдена")
+    fields = payload.model_dump(exclude_unset=True)
+    if "neurons_per_week" in fields and fields["neurons_per_week"] is not None:
+        sub.neurons_per_week = float(fields["neurons_per_week"])
+    if "expires_at" in fields and fields["expires_at"] is not None:
+        sub.expires_at = fields["expires_at"]
+        if aware(sub.current_period_end) > aware(sub.expires_at):
+            sub.current_period_end = sub.expires_at
+    await session.commit()
+    await audit.log_action(
+        session,
+        actor=actor,
+        action="subscription.update",
+        entity_type="subscription",
+        entity_id=str(sub.id),
+        payload={
+            key: value.isoformat() if hasattr(value, "isoformat") else value
+            for key, value in fields.items()
+        },
+        ip=client_ip(request),
+    )
+    return await _sub_out(session, sub)
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +733,7 @@ async def reply_ticket(
         await notifications.notify_user(
             request.app.state.bot,
             user.tg_id,
-            f"💬 <b>Ответ поддержки</b>\n\n{payload.text}\n\n"
+            f"💬 <b>Ответ поддержки</b>\n\n{esc(payload.text)}\n\n"
             f"Тикет: <code>{str(ticket.id)[:8]}</code>",
         )
     await audit.log_action(

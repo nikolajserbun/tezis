@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -26,7 +27,6 @@ class UserOut(ORMModel):
     role: str
     referral_code: str
     balance_minor: int
-    generations_bonus: int = 0
     neurons_bonus: float = 0.0
     neurons_limit_override: float | None = None
     is_blocked: bool
@@ -39,7 +39,6 @@ class UserUpdateIn(BaseModel):
 
     is_blocked: bool | None = None
     balance_delta_minor: int | None = None
-    generations_bonus: int | None = Field(default=None, ge=-1_000_000, le=1_000_000)
     neurons_bonus: float | None = Field(default=None, ge=-1_000_000, le=1_000_000)
     # null in the payload resets the per-user limit back to the global one.
     neurons_limit_override: float | None = Field(default=None, ge=1, le=10_000_000)
@@ -101,7 +100,7 @@ class ProductOut(ORMModel):
     currency: str
     price_stars: int | None = None
     duration_days: int | None = None
-    generations_per_month: int | None = None
+    neurons_per_week: float = 0.0
     brand_limit: int
     file_key: str | None = None
     cover_url: str | None = None
@@ -184,7 +183,7 @@ class InvoiceOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Subscriptions / generations
+# Subscriptions / Neurons
 # ---------------------------------------------------------------------------
 
 
@@ -199,21 +198,28 @@ class SubscriptionOut(ORMModel):
     current_period_end: datetime
     expires_at: datetime
     auto_renew: bool
-    generations_limit: int
-    generations_used: int
+    neurons_limit: float = 0.0
+    neurons_used: float = 0.0
     source_order_id: UUID | None = None
+
+
+class SubscriptionUpdateIn(BaseModel):
+    """Owner adjustments to one active subscription."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    neurons_per_week: float | None = Field(default=None, ge=0, le=10_000_000)
+    expires_at: datetime | None = None
 
 
 class UsageOut(BaseModel):
     has_subscription: bool
     plan_title: str | None = None
-    generations_limit: int = 0
-    generations_used: int = 0
-    generations_left: int = 0
-    free_generations_left: int = 0
     neurons_limit: float = 0.0
     neurons_used: float = 0.0
     neurons_left: float = 0.0
+    # Next weekly refill; None means the free budget never refreshes.
+    resets_at: datetime | None = None
     expires_at: datetime | None = None
 
 
@@ -252,7 +258,6 @@ class ChatOut(BaseModel):
     demo_mode: bool = False
     tokens: int = 0
     cost_minor: int = 0
-    generations_left: int = 0
     neurons_left: float = 0.0
     created_at: datetime
 
@@ -377,6 +382,21 @@ class BroadcastOut(ORMModel):
 # ---------------------------------------------------------------------------
 
 
+def _safe_file_key(value: str | None) -> str | None:
+    """Only relative asset paths from a fixed allowlist of characters."""
+    if value is None:
+        return None
+    if (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or ".." in value.split("/")
+        or not re.fullmatch(r"[A-Za-z0-9_./-]+", value)
+    ):
+        raise ValueError("file_key должен быть относительным путём внутри assets")
+    return value
+
+
 class ProductCreateIn(BaseModel):
     slug: str = Field(min_length=2, max_length=80)
     title: str = Field(min_length=2, max_length=160)
@@ -386,13 +406,18 @@ class ProductCreateIn(BaseModel):
     currency: str = "RUB"
     price_stars: int | None = Field(default=None, ge=0)
     duration_days: int | None = Field(default=None, ge=1)
-    generations_per_month: int | None = Field(default=None, ge=0)
+    neurons_per_week: float = Field(default=0.0, ge=0)
     brand_limit: int = Field(default=1, ge=1)
     file_key: str | None = None
     cover_url: str | None = None
     features: list[str] = Field(default_factory=list)
     is_active: bool = True
     sort_order: int = 0
+
+    @field_validator("file_key")
+    @classmethod
+    def validate_file_key(cls, value: str | None) -> str | None:
+        return _safe_file_key(value)
 
 
 class ProductUpdateIn(BaseModel):
@@ -401,13 +426,18 @@ class ProductUpdateIn(BaseModel):
     price_minor: int | None = Field(default=None, ge=0)
     price_stars: int | None = Field(default=None, ge=0)
     duration_days: int | None = Field(default=None, ge=1)
-    generations_per_month: int | None = Field(default=None, ge=0)
+    neurons_per_week: float | None = Field(default=None, ge=0)
     brand_limit: int | None = Field(default=None, ge=1)
     file_key: str | None = None
     cover_url: str | None = None
     features: list[str] | None = None
     is_active: bool | None = None
     sort_order: int | None = None
+
+    @field_validator("file_key")
+    @classmethod
+    def validate_file_key(cls, value: str | None) -> str | None:
+        return _safe_file_key(value)
 
 
 class ExpenseCreateIn(BaseModel):

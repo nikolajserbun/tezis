@@ -4,11 +4,16 @@ import os
 from pathlib import Path
 
 TEST_DB = Path(__file__).resolve().parent / "test_tezis.db"
+TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB.as_posix()}"
 
+if not TEST_DB.name.startswith("test_"):  # pragma: no cover - sanity guard
+    raise RuntimeError("Tests must use a dedicated test database")
+
+# Never let an ambient production DATABASE_URL reach drop_all() below.
 os.environ["APP_ENV"] = "dev"
 os.environ["DEV_PAYMENTS_ENABLED"] = "true"
 os.environ["BOT_MODE"] = "polling"
-os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{TEST_DB.as_posix()}")
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("BOT_TOKEN", "123456:TEST-TOKEN")
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-key-with-32-bytes-min")
 os.environ["WEBHOOK_SECRET"] = "test-webhook-secret-with-32-bytes-min"
@@ -33,7 +38,8 @@ from app.core.db import SessionLocal
 from app.core.security import create_access_token
 from app.main import app
 from app.models import Product, User, UserRole
-from app.services import users
+from app.services import llm, users
+from app.services.llm import Completion
 
 
 @pytest_asyncio.fixture
@@ -72,7 +78,7 @@ async def product(session) -> Product:
         price_minor=99000,
         price_stars=762,
         duration_days=30,
-        generations_per_month=3,
+        neurons_per_week=100.0,
         brand_limit=1,
         features=["тест"],
     )
@@ -137,6 +143,26 @@ async def client(session, owner):
 async def staff_client(client, owner_headers):
     client.headers.update(owner_headers)
     return client
+
+
+@pytest.fixture
+def fake_chat_llm(monkeypatch: pytest.MonkeyPatch):
+    """Stand in for a real provider; records the exact messages sent to it."""
+    calls: list[list[dict[str, str]]] = []
+
+    async def complete(
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.7,
+        max_tokens=None,
+        client=None,
+    ) -> Completion:
+        calls.append([dict(item) for item in messages])
+        return Completion(text="Ответ модели", tokens=120, neurons=3.0)
+
+    monkeypatch.setattr(llm, "is_enabled", lambda: True)
+    monkeypatch.setattr(llm, "complete_with_usage", complete)
+    return calls
 
 
 async def get_user_by_tg(session, tg_id: int) -> User | None:

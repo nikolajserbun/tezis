@@ -117,9 +117,6 @@ class User(Base, TimestampMixin):
     )
     balance_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     # Per-user limits set by the owner. Bonuses are signed: negative means a cut.
-    generations_bonus: Mapped[int] = mapped_column(
-        Integer, default=0, nullable=False, server_default=text("0")
-    )
     neurons_bonus: Mapped[float] = mapped_column(
         Float, default=0.0, nullable=False, server_default=text("0")
     )
@@ -185,7 +182,10 @@ class Product(Base, TimestampMixin):
     currency: Mapped[str] = mapped_column(String(3), default="RUB", nullable=False)
     price_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    generations_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Weekly Neurons allowance for subscription products; refreshed every 7 days.
+    neurons_per_week: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False, server_default=text("0")
+    )
     brand_limit: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     file_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -374,8 +374,11 @@ class Subscription(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False, index=True
     )
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    generations_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    generations_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Snapshot of the plan's weekly allowance at purchase time. The owner can
+    # adjust it individually without changing the whole tariff.
+    neurons_per_week: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False, server_default=text("0")
+    )
     source_order_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )

@@ -127,7 +127,12 @@ export default function AdminApp() {
   }
 
   if (!me) {
-    const fallbackConfig: Config = { app_name: 'Тезис', bot_username: '', app_env: 'prod' }
+    const fallbackConfig: Config = {
+      app_name: 'Тезис',
+      bot_username: '',
+      app_env: 'prod',
+      dev_features_enabled: false,
+    }
     return (
       <>
         {config.error && (

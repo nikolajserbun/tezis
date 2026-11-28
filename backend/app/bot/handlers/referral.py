@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -11,6 +13,7 @@ from app.bot import texts
 from app.bot.helpers import edit_message
 from app.bot.states import Payout
 from app.core.errors import AppError
+from app.core.text import esc
 from app.models import User
 from app.services import notifications, referrals
 
@@ -79,8 +82,14 @@ async def payout_amount(
 ) -> None:
     raw = (message.text or "").replace(" ", "").replace(",", ".").replace("₽", "").strip()
     try:
-        amount = int(float(raw) * 100)
-    except ValueError:
+        value = Decimal(raw)
+        if not value.is_finite():
+            raise InvalidOperation
+        minor = value * 100
+        if minor != minor.to_integral_value():
+            raise InvalidOperation
+        amount = int(minor)
+    except (InvalidOperation, ValueError, OverflowError):
         await message.answer("Напишите сумму числом, например: 1500")
         return
     if amount < 100_000:
@@ -126,8 +135,8 @@ async def payout_requisites(
     await notifications.notify_admins(
         message.bot,
         "💸 <b>Новая заявка на выплату</b>\n\n"
-        f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)\n"
+        f"Пользователь: {esc(user.display_name)} (<code>{user.tg_id}</code>)\n"
         f"Сумма: {texts.money(payout.amount_minor)}\n"
-        f"Реквизиты: {payout.requisites}\n"
+        f"Реквизиты: {esc(payout.requisites)}\n"
         f"ID: <code>{payout.id}</code>",
     )

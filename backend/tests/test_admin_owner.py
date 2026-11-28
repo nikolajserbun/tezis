@@ -61,21 +61,18 @@ async def test_owner_can_set_personal_limits(
     response = await staff_client.patch(
         f"/api/v1/admin/users/{user.id}",
         json={
-            "generations_bonus": 7,
             "neurons_bonus": 50,
             "neurons_limit_override": 600,
         },
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["generations_bonus"] == 7
     assert payload["neurons_bonus"] == 50
     assert payload["neurons_limit_override"] == 600
 
     usage = await client.get("/api/v1/me/usage", headers=user_headers)
     assert usage.status_code == 200
     body = usage.json()
-    assert body["generations_limit"] == 12
     assert body["neurons_limit"] == 650
     assert body["neurons_left"] == 650
 
@@ -102,23 +99,19 @@ async def test_role_cannot_be_granted_through_admin_api(staff_client, user) -> N
 
 
 @pytest.mark.asyncio
-async def test_generations_bonus_applies_to_paid_plan(session, user, product) -> None:
+async def test_neuron_bonus_applies_to_paid_plan(session, user, product) -> None:
     sub = await subscriptions.create_or_extend(session, user=user, product=product)
-    user.generations_bonus = 2
+    weekly = float(product.neurons_per_week)
+    user.neurons_bonus = 50
     await session.commit()
 
-    allowed, active, is_free, used, limit, _n_used, n_limit = (
-        await subscriptions.check_limit(session, user)
-    )
+    allowed, active, is_free, used, limit = await subscriptions.check_limit(session, user)
     assert allowed and active == sub and not is_free
-    assert used == 0 and limit == 5
-    assert n_limit == 0.0
+    assert used == 0 and limit == weekly + 50
 
-    user.generations_bonus = -3
+    user.neurons_bonus = -weekly
     await session.commit()
-    allowed, _active, _free, _used, limit, _n_used, _n_limit = (
-        await subscriptions.check_limit(session, user)
-    )
+    allowed, _active, _free, _used, limit = await subscriptions.check_limit(session, user)
     assert not allowed and limit == 0
 
 
@@ -137,7 +130,7 @@ async def test_paid_neuron_override_is_enforced(session, user, product) -> None:
     )
     await session.commit()
 
-    allowed, active, is_free, _used, _limit, neurons_used, neurons_limit = (
+    allowed, active, is_free, neurons_used, neurons_limit = (
         await subscriptions.check_limit(session, user)
     )
     assert not allowed and active == sub and not is_free
@@ -149,7 +142,7 @@ async def test_paid_neuron_override_is_enforced(session, user, product) -> None:
     assert usage.neurons_left == 0.0
 
     with pytest.raises(PaymentError, match="Neurons"):
-        await chat.ask(session, user=user, brand=None, message="Ещё", web_search=False)
+        await chat.ask(session, user=user, message="Ещё", web_search=False)
 
 
 @pytest.mark.asyncio

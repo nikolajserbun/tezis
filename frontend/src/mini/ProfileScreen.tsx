@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Badge, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner } from '../components/ui'
-import { date, money, plural, shortId } from '../lib/format'
+import { date, money, neurons, plural, shortId } from '../lib/format'
 import type { Payout, ReferralStats, Subscription, SupportTicket } from '../lib/api'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle, CopyButton } from './parts'
@@ -145,9 +145,9 @@ export function ProfileScreen({
               <Badge value={subscription.data.status} />
             </div>
             <div className="mt-4 flex items-center justify-between border-t border-ink-100 pt-4 text-sm">
-              <span className="text-ink-500">Генераций</span>
+              <span className="text-ink-500">Neurons на неделю</span>
               <span className="font-medium text-ink-900">
-                {subscription.data.generations_used} / {subscription.data.generations_limit}
+                {neurons(subscription.data.neurons_used)} / {neurons(subscription.data.neurons_limit)}
               </span>
             </div>
           </div>
@@ -345,7 +345,7 @@ export function ProfileScreen({
         >
           Выйти
         </button>
-        {config.app_env !== 'prod' && (
+        {(config.dev_features_enabled ?? config.app_env === 'dev') && (
           <p className="hint text-center">Локальный демо-режим · {config.app_env}</p>
         )}
       </section>

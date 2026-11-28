@@ -118,6 +118,6 @@ async def shop_buy(
             texts.order_card(order),
             reply_markup=kb.checkout_actions(
                 str(order.id),
-                dev_enabled=settings.dev_payments_enabled and not settings.is_prod,
+                dev_enabled=settings.dev_payments_allowed,
             ),
         )

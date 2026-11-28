@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -166,7 +166,20 @@ async def request_payout(
     if not requisites.strip():
         raise ValidationError("Укажите реквизиты")
 
-    user.balance_minor -= amount_minor
+    # Debit in one conditional UPDATE: two parallel payout requests can never
+    # both spend the same balance.
+    debit = await session.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.balance_minor >= amount_minor,
+        )
+        .values(balance_minor=User.balance_minor - amount_minor)
+        .execution_options(synchronize_session="fetch")
+    )
+    if int(getattr(debit, "rowcount", 0) or 0) != 1:
+        raise ValidationError("Недостаточно средств на балансе")
+
     payout = Payout(
         user_id=user.id,
         amount_minor=amount_minor,

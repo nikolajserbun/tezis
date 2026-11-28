@@ -42,50 +42,64 @@ async def test_generation_spends_neurons(session, user) -> None:
     assert usage.neurons_left < settings.free_neurons
 
 
-async def test_subscription_limits_and_reset(session, user, product) -> None:
+async def test_subscription_weekly_limit_and_reset(session, user, product) -> None:
     sub = await subscriptions.create_or_extend(session, user=user, product=product)
-    sub.generations_limit = 1
-    sub.generations_used = 0
-    await session.commit()
+    weekly = float(product.neurons_per_week)
+    assert weekly > 0
 
-    allowed, active, is_free, used, limit, _neurons_used, _neurons_limit = (
-        await subscriptions.check_limit(session, user)
-    )
-    assert allowed and not is_free and limit == 1 and used == 0
-    assert active is not None
+    allowed, active, is_free, used, limit = await subscriptions.check_limit(session, user)
+    assert allowed and active is not None and not is_free
+    assert used == 0 and limit == weekly
 
     await ai.generate(
         session, user=user, brand=None, kind="post", platform="telegram", topic="Один"
     )
-    allowed, _active, _free, used, _limit, _neurons_used, _neurons_limit = (
-        await subscriptions.check_limit(session, user)
-    )
-    assert not allowed and used == 1
+    allowed, _active, _free, used, _limit = await subscriptions.check_limit(session, user)
+    assert allowed and 0 < used < weekly
 
+    # Fill the rest of the weekly allowance with a direct usage event.
+    session.add(
+        UsageEvent(
+            user_id=user.id,
+            subscription_id=sub.id,
+            kind="chat",
+            tokens=100,
+            neurons=weekly,
+        )
+    )
+    await session.commit()
+    allowed, _active, _free, used, _limit = await subscriptions.check_limit(session, user)
+    assert not allowed and used >= weekly
+
+    usage = await subscriptions.usage(session, user)
+    assert usage.has_subscription is True
+    assert usage.neurons_left == 0.0
+    assert usage.resets_at is not None
+
+    # A new weekly window after the previous one ends resets consumption.
     sub = await subscriptions.get_active(session, user.id)
     assert sub is not None
+    sub.current_period_start = utcnow() - timedelta(days=8)
     sub.current_period_end = utcnow() - timedelta(days=1)
     sub.expires_at = utcnow() + timedelta(days=10)
     await session.commit()
 
-    allowed, _active, is_free, used, _limit, _neurons_used, _neurons_limit = (
-        await subscriptions.check_limit(session, user)
-    )
+    allowed, _active, is_free, used, _limit = await subscriptions.check_limit(session, user)
     assert allowed and not is_free and used == 0
 
 
 async def test_usage_reports_free_quota(session, user) -> None:
     usage = await subscriptions.usage(session, user)
     assert usage.has_subscription is False
-    assert usage.free_generations_left == settings.free_generations
     assert usage.neurons_limit == settings.free_neurons
     assert usage.neurons_used == 0
     assert usage.neurons_left == settings.free_neurons
+    # Free Neurons are a lifetime budget: there is no refill date.
+    assert usage.resets_at is None
 
 
 async def test_paid_plan_ignores_free_neuron_limit(session, user, product) -> None:
     sub = await subscriptions.create_or_extend(session, user=user, product=product)
-    sub.generations_limit = 10
     session.add(
         UsageEvent(
             user_id=user.id,
@@ -97,26 +111,26 @@ async def test_paid_plan_ignores_free_neuron_limit(session, user, product) -> No
     )
     await session.commit()
 
-    allowed, active, is_free, used, limit, neurons_used, neurons_limit = (
-        await subscriptions.check_limit(session, user)
-    )
-    assert allowed and active is not None and not is_free
-    assert used == 0 and limit == 10
-    assert neurons_used == 0.0 and neurons_limit == 0.0
+    allowed, active, is_free, used, limit = await subscriptions.check_limit(session, user)
+    assert not allowed and active is not None and not is_free
+    assert used >= limit
+    assert limit == float(product.neurons_per_week)
 
     usage = await subscriptions.usage(session, user)
     assert usage.has_subscription is True
-    assert usage.neurons_limit == 0.0
+    assert usage.neurons_limit == float(product.neurons_per_week)
     assert usage.neurons_left == 0.0
 
 
-async def test_extending_same_plan_accumulates(session, user, product) -> None:
+async def test_extending_same_plan_keeps_weekly_allowance(session, user, product) -> None:
     first = await subscriptions.create_or_extend(session, user=user, product=product)
-    start_limit = first.generations_limit
+    weekly = first.neurons_per_week
+    first_expiry = ensure_aware(first.expires_at)
     second = await subscriptions.create_or_extend(session, user=user, product=product)
     assert second.id == first.id
-    assert second.generations_limit == start_limit * 2
-    assert ensure_aware(second.expires_at) > ensure_aware(first.started_at)
+    # The plan's weekly allowance does not accumulate; only the end date moves.
+    assert second.neurons_per_week == weekly
+    assert ensure_aware(second.expires_at) > first_expiry
 
 
 async def test_expire_due_marks_subscriptions(session, user, product) -> None:

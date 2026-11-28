@@ -18,7 +18,7 @@ export function LoginScreen({
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const isDev = config.app_env !== 'prod'
+  const isDev = config.dev_features_enabled ?? config.app_env === 'dev'
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()

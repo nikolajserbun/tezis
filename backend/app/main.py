@@ -21,6 +21,7 @@ from app.core.db import create_all, engine
 from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger
 from app.core.monitoring import capture_exception, init_sentry, should_alert
+from app.core.rate_limit import limiter
 from app.core.security import SecurityError
 from app.services import notifications
 
@@ -177,6 +178,7 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(*pending, return_exceptions=True)
         if bot is not None:
             await bot.session.close()
+        await limiter.aclose()
         await engine.dispose()
         logger.info("shutdown")
 

@@ -13,7 +13,7 @@ interface ProductFormState {
   currency: string
   priceStars: string
   durationDays: string
-  generationsPerMonth: string
+  neuronsPerWeek: string
   brandLimit: string
   fileKey: string
   coverUrl: string
@@ -32,7 +32,7 @@ function emptyForm(): ProductFormState {
     currency: 'RUB',
     priceStars: '',
     durationDays: '',
-    generationsPerMonth: '',
+    neuronsPerWeek: '',
     brandLimit: '1',
     fileKey: '',
     coverUrl: '',
@@ -52,7 +52,7 @@ function formFromProduct(product: Product): ProductFormState {
     currency: product.currency,
     priceStars: product.price_stars === null ? '' : String(product.price_stars),
     durationDays: product.duration_days === null ? '' : String(product.duration_days),
-    generationsPerMonth: product.generations_per_month === null ? '' : String(product.generations_per_month),
+    neuronsPerWeek: product.kind === 'subscription' ? String(product.neurons_per_week) : '',
     brandLimit: String(product.brand_limit),
     fileKey: product.file_key ?? '',
     coverUrl: product.cover_url ?? '',
@@ -67,6 +67,14 @@ function optionalInt(value: string, label: string): number | null {
   if (!trimmed) return null
   const parsed = Number(trimmed)
   if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${label}: введите целое число`)
+  return parsed
+}
+
+function optionalFloat(value: string, label: string): number {
+  const trimmed = value.trim()
+  if (!trimmed) return 0
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${label}: введите число`)
   return parsed
 }
 
@@ -106,6 +114,10 @@ export default function ProductsSection({ canManage }: { canManage: boolean }) {
       if (!Number.isFinite(priceMinor) || priceMinor < 0) throw new Error('Цена должна быть неотрицательным числом')
       const brandLimit = optionalInt(form.brandLimit, 'Лимит брендов')
       if (brandLimit === null || brandLimit < 1) throw new Error('Лимит брендов должен быть не меньше 1')
+      const neuronsPerWeek = optionalFloat(form.neuronsPerWeek, 'Neurons в неделю')
+      if (form.kind === 'subscription' && neuronsPerWeek <= 0) {
+        throw new Error('Для подписки укажите Neurons в неделю больше нуля')
+      }
 
       const body: Record<string, unknown> = {
         title: form.title.trim(),
@@ -114,7 +126,7 @@ export default function ProductsSection({ canManage }: { canManage: boolean }) {
         currency: form.currency.trim() || 'RUB',
         price_stars: optionalInt(form.priceStars, 'Цена в звёздах'),
         duration_days: optionalInt(form.durationDays, 'Длительность'),
-        generations_per_month: optionalInt(form.generationsPerMonth, 'Генераций в месяц'),
+        neurons_per_week: form.kind === 'subscription' ? neuronsPerWeek : 0,
         brand_limit: brandLimit,
         file_key: form.fileKey.trim() || null,
         cover_url: form.coverUrl.trim() || null,
@@ -194,7 +206,9 @@ export default function ProductsSection({ canManage }: { canManage: boolean }) {
                         )}
                       </td>
                       <td className="whitespace-nowrap text-xs text-ink-500">
-                        {product.generations_per_month ?? '—'} генераций/мес
+                        {product.kind === 'subscription'
+                          ? `${product.neurons_per_week} Neurons/нед`
+                          : '—'}
                         <span className="block">{product.brand_limit} бренд(а)</span>
                       </td>
                       <td>
@@ -304,13 +318,18 @@ export default function ProductsSection({ canManage }: { canManage: boolean }) {
                 onChange={(event) => update('durationDays', event.target.value)}
               />
             </Field>
-            <Field label="Генераций в месяц">
+            <Field
+              label="Neurons в неделю"
+              hint={form.kind === 'subscription' ? 'Пополняется каждые 7 дней.' : 'Только для подписок.'}
+            >
               <input
                 className="input"
                 type="number"
                 min={0}
-                value={form.generationsPerMonth}
-                onChange={(event) => update('generationsPerMonth', event.target.value)}
+                step="0.1"
+                value={form.neuronsPerWeek}
+                onChange={(event) => update('neuronsPerWeek', event.target.value)}
+                disabled={form.kind !== 'subscription'}
               />
             </Field>
             <Field label="Лимит брендов">

@@ -116,11 +116,15 @@ async def dev_login(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> TokenOut:
-    if settings.is_prod or settings.owner_tg_id <= 0:
-        raise Forbidden("Dev login is disabled in production")
+    if not settings.dev_auth_enabled or settings.owner_tg_id <= 0:
+        raise Forbidden("Dev login is disabled outside local development")
     if not (
-        hmac.compare_digest(payload.email, settings.dev_admin_email)
-        and hmac.compare_digest(payload.password, settings.dev_admin_password)
+        hmac.compare_digest(
+            payload.email.encode("utf-8"), settings.dev_admin_email.encode("utf-8")
+        )
+        and hmac.compare_digest(
+            payload.password.encode("utf-8"), settings.dev_admin_password.encode("utf-8")
+        )
     ):
         raise Unauthorized("Неверный email или пароль")
 
@@ -156,6 +160,8 @@ async def public_config() -> dict:
         "app_name": settings.app_name,
         "bot_username": settings.bot_username.lstrip("@"),
         "app_env": settings.app_env,
+        "dev_features_enabled": settings.dev_auth_enabled,
+        "dev_payments_enabled": settings.dev_payments_allowed,
     }
 
 

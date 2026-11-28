@@ -98,7 +98,7 @@ async def pay_dev(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> OrderOut:
-    if settings.is_prod or not settings.dev_payments_enabled:
+    if not settings.dev_payments_allowed:
         raise ValidationError("Тестовая оплата отключена")
     order = await orders.get_order(session, order_id, user.id)
     order = await payments.confirm_manual_payment(session, order_id=order.id, admin=user)

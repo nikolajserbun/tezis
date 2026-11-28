@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     dev_admin_email: str = "owner@tezis.local"
     dev_admin_password: str = "tezis-dev-2026"
     dev_payments_enabled: bool = True
+    # Number of trusted reverse proxies between the client and the app. Used
+    # only to pick the right X-Forwarded-For entry; Vercel sets its own header.
+    trusted_proxy_count: int = 0
 
     # Database / queue
     database_url: str = "sqlite+aiosqlite:///./tezis.db"
@@ -77,8 +80,9 @@ class Settings(BaseSettings):
     ai_max_tokens: int = 1800
     ai_cost_per_1k_minor: int = 50  # 0.50 RUB per 1K tokens (planning assumption)
     ai_neurons_per_1k_tokens: float = 25.0  # fallback when provider has no Neurons field
-    free_neurons: float = 500.0  # per-account budget without a subscription
-    free_generations: int = 5  # legacy counter, kept for compatibility
+    # Lifetime budget without a subscription: it never refreshes.
+    free_neurons: float = 500.0
+    subscription_period_days: int = 7  # paid Neurons renew weekly
     generation_history_days: int = 30
     tavily_api_key: str = ""
     serper_api_key: str = ""
@@ -103,6 +107,16 @@ class Settings(BaseSettings):
     def is_serverless(self) -> bool:
         """True on Vercel, where processes are short-lived and stateless."""
         return bool(self.vercel or self.vercel_url)
+
+    @property
+    def dev_auth_enabled(self) -> bool:
+        """Dev login is a local-only shortcut, never a staging/prod feature."""
+        return not self.is_prod and self.app_env.lower() == "dev"
+
+    @property
+    def dev_payments_allowed(self) -> bool:
+        """Test payments follow the same rule as the dev login."""
+        return self.dev_payments_enabled and self.dev_auth_enabled
 
     @property
     def telegram_webhook_secret(self) -> str:
@@ -253,6 +267,13 @@ class Settings(BaseSettings):
         allowed_origins = {origin.rstrip("/") for origin in self.cors_origin_list}
         if self.frontend_url.rstrip("/") not in allowed_origins:
             raise ValueError("CORS_ORIGINS must include FRONTEND_URL in production")
+        if any(
+            "localhost" in origin or "127.0.0.1" in origin
+            for origin in allowed_origins
+        ):
+            raise ValueError("CORS_ORIGINS must not contain localhost in production")
+        if self.dev_auth_enabled or self.dev_payments_allowed:
+            raise ValueError("Dev auth and dev payments must be disabled in production")
         return self
 
 

@@ -9,7 +9,7 @@ type ValueKind = 'boolean' | 'number' | 'json' | 'string'
 const KEY_LABELS: Record<string, string> = {
   support_username: 'Поддержка в Telegram',
   referral_bonus_minor: 'Бонус за первого друга, коп.',
-  free_generations: 'Бесплатные генерации',
+  free_neurons: 'Бесплатные Neurons (без подписки, не обновляются)',
   maintenance_mode: 'Режим обслуживания',
   community_chat_id: 'ID чата сообщества',
   stars_rub_rate: 'Курс звёзд, ₽',

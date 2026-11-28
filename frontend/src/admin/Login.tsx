@@ -122,7 +122,7 @@ export default function Login({
     )
   }
 
-  const devEnabled = config.app_env !== 'prod'
+  const devEnabled = config.dev_features_enabled ?? config.app_env === 'dev'
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-ivory px-4 py-10">

@@ -97,7 +97,6 @@ export interface User {
   role: Role
   referral_code: string
   balance_minor: number
-  generations_bonus: number
   neurons_bonus: number
   neurons_limit_override: number | null
   is_blocked: boolean
@@ -116,13 +115,11 @@ export interface BrandProfile {
 export interface Usage {
   has_subscription: boolean
   plan_title: string | null
-  generations_limit: number
-  generations_used: number
-  generations_left: number
-  free_generations_left: number
   neurons_limit: number
   neurons_used: number
   neurons_left: number
+  // Next weekly refill; null means the free lifetime budget never refreshes.
+  resets_at: string | null
   expires_at: string | null
 }
 
@@ -142,7 +139,7 @@ export interface Product {
   currency: string
   price_stars: number | null
   duration_days: number | null
-  generations_per_month: number | null
+  neurons_per_week: number
   brand_limit: number
   file_key: string | null
   cover_url: string | null
@@ -201,8 +198,9 @@ export interface Subscription {
   current_period_end: string
   expires_at: string
   auto_renew: boolean
-  generations_limit: number
-  generations_used: number
+  neurons_per_week: number
+  neurons_limit: number
+  neurons_used: number
   source_order_id: string | null
 }
 
@@ -241,7 +239,6 @@ export interface ChatAnswer {
   demo_mode: boolean
   tokens: number
   cost_minor: number
-  generations_left: number
   neurons_left: number
   created_at: string
 }
@@ -383,6 +380,12 @@ export function useApi<T>(path: string | null, deps: unknown[] = []) {
   const [tick, setTick] = useState(0)
 
   const reload = useCallback(() => setTick((value) => value + 1), [])
+
+  // A new session/endpoint must never render the previous account's data.
+  // Do not clear on `tick`: that is an explicit reload of the same endpoint.
+  useEffect(() => {
+    setData(null)
+  }, [path])
 
   useEffect(() => {
     if (!path) {

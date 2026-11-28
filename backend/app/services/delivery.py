@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from aiogram import Bot
 from aiogram.types import FSInputFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.text import esc
 from app.core.utils import utcnow
 from app.models import (
     Delivery,
@@ -28,22 +27,23 @@ async def _send_digital(
     if product is None or not product.file_key:
         await bot.send_message(
             order.user.tg_id,
-            f"📦 <b>{item.title}</b>\n\n"
+            f"📦 <b>{esc(item.title)}</b>\n\n"
             "Материал доступен. Если файл не пришёл — напишите в поддержку.",
         )
         return
 
-    path = Path(settings.assets_path) / product.file_key
-    if path.exists():
+    root = settings.assets_path.resolve()
+    path = (root / product.file_key).resolve()
+    if path.is_relative_to(root) and path.is_file():
         await bot.send_document(
             order.user.tg_id,
             FSInputFile(path, filename=path.name),
-            caption=f"📦 <b>{item.title}</b>\n\nСпасибо за покупку!",
+            caption=f"📦 <b>{esc(item.title)}</b>\n\nСпасибо за покупку!",
         )
     else:
         await bot.send_message(
             order.user.tg_id,
-            f"📦 <b>{item.title}</b>\n\n"
+            f"📦 <b>{esc(item.title)}</b>\n\n"
             "Файл готовится. Мы уже получили оплату, материал придёт в этот чат. "
             "Если что-то не так — напишите в поддержку.",
         )
@@ -87,10 +87,9 @@ async def fulfill_order(
                         await bot.send_message(
                             order.user.tg_id,
                             f"💎 <b>Подписка активирована</b>\n\n"
-                            f"Тариф: {item.title}\n"
+                            f"Тариф: {esc(item.title)}\n"
                             f"Действует до: {sub.expires_at:%d.%m.%Y}\n"
-                            "Генераций доступно: "
-                            f"{max(sub.generations_limit - sub.generations_used, 0)}",
+                            f"Neurons каждую неделю: {sub.neurons_per_week:g}",
                         )
                         await community.grant_access(
                             session, bot=bot, user=order.user, subscription=sub

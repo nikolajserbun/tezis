@@ -54,6 +54,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       BOT_MODE: ${BOT_MODE:-polling}
       SEARXNG_URL: http://searxng:8080
+      # Caddy is the only proxy in front of the API; trust its X-Forwarded-For.
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
     command: >-
       sh -c "alembic upgrade head &&
       uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"

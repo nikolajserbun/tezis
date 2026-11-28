@@ -59,7 +59,7 @@ PAYWALL = (
     "💎 <b>Бесплатный лимит Neurons исчерпан</b>\n\n"
     "Чтобы продолжать создавать контент без ограничений, выберите тариф. "
     "Оплата проходит через Telegram Stars — карта не нужна.\n\n"
-    "Можно начать с Start за 200 ₽/мес: 15 генераций, контент-план и история."
+    "Можно начать с Start за 200 ₽/мес: 500 Neurons каждую неделю, контент-план и история."
 )
 
 SUPPORT_FAQ = (
@@ -140,7 +140,7 @@ def product_card(product: Product) -> str:
         features = "\n" + "\n".join(f"• {item}" for item in product.features[:6])
     if product.kind == "subscription":
         period = f"{product.duration_days or 30} дней"
-        quota = f"{product.generations_per_month or 0} генераций/мес"
+        quota = f"{product.neurons_per_week:g} Neurons каждую неделю"
         return (
             f"💎 <b>{product.title}</b>\n\n"
             f"{product.description}\n"
@@ -174,8 +174,8 @@ def order_card(order: Order) -> str:
 def profile_text(user: User, usage, orders_count: int) -> str:
     plan = usage.plan_title if usage.has_subscription else "Free"
     if usage.has_subscription:
-        quota_label = "Генерации"
-        quota = f"{usage.generations_used}/{usage.generations_limit} использовано"
+        quota_label = "Neurons на неделю"
+        quota = f"{usage.neurons_used:g}/{usage.neurons_limit:g} использовано"
         expiry = usage.expires_at.strftime("%d.%m.%Y") if usage.expires_at else "—"
     else:
         quota_label = "Лимит"

@@ -8,7 +8,6 @@ from aiogram.enums import ChatAction
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards as kb
@@ -16,17 +15,17 @@ from app.bot.helpers import edit_message
 from app.bot.states import Chat
 from app.core.errors import AppError, ServiceUnavailable
 from app.core.utils import chunk_text
-from app.models import BrandProfile, User
+from app.models import User
 from app.services import chat as chat_service
 
 router = Router(name="ai_chat")
 
 CHAT_INTRO = (
     "💬 <b>Чат с ИИ</b>\n\n"
-    "Пишите вопросы простым текстом — я учту ваш профиль бренда и отвечу по "
-    "встроенной базе знаний или свежим материалам.\n\n"
-    "Бесплатно доступно 500 Neurons на аккаунт; с подпиской лимита обычно нет. "
-    "Расход зависит от модели и длины ответа.\n\n"
+    "Пишите вопросы простым текстом — ИИ ответит как обычно, с учётом истории "
+    "диалога.\n\n"
+    "Бесплатно доступно 500 Neurons на аккаунт, без обновления. С подпиской лимит "
+    "пополняется каждую неделю. Расход зависит от модели и длины ответа.\n\n"
     "Чтобы выйти, нажмите «Завершить диалог» или напишите «выход»."
 )
 
@@ -37,12 +36,6 @@ MAX_QUESTION = 1000
 def _plain(text: str) -> str:
     """Turn service HTML into text that is always safe for Telegram parse_mode."""
     return html.escape(html.unescape(re.sub(r"<[^>]*>", "", text))).strip()
-
-
-async def _brand(session: AsyncSession, user: User) -> BrandProfile | None:
-    return await session.scalar(
-        select(BrandProfile).where(BrandProfile.user_id == user.id)
-    )
 
 
 @router.message(Command("chat"))
@@ -95,10 +88,9 @@ async def chat_message(
 
     if message.bot is not None:
         await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-    brand = await _brand(session, user)
     try:
         answer = await chat_service.ask(
-            session, user=user, brand=brand, message=question, web_search=True
+            session, user=user, message=question, web_search=True
         )
     except ServiceUnavailable:
         await message.answer(

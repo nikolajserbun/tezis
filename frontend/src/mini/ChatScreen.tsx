@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { EmptyState, ErrorState, Spinner } from '../components/ui'
 import type { ChatAnswer, ChatMessage } from '../lib/api'
-import { neurons, plural, plainText } from '../lib/format'
+import { neurons, plainText } from '../lib/format'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle } from './parts'
 import { openExternal } from './telegram'
@@ -16,11 +16,8 @@ export function ChatScreen() {
   const [busy, setBusy] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const neuronLimited = me.usage.neurons_limit > 0
-  const left = neuronLimited ? me.usage.neurons_left : me.usage.generations_left
-  const leftLabel = neuronLimited
-    ? neurons(left)
-    : plural(left, ['генерация', 'генерации', 'генераций'])
+  const left = me.usage.neurons_left
+  const leftLabel = neurons(left)
 
   useEffect(() => {
     if (history.data) setMessages(history.data)
@@ -178,9 +175,8 @@ export function ChatScreen() {
         />
         <div className="flex items-center justify-between gap-3">
           <p className="hint">
-            {neuronLimited
-              ? `Расход Neurons зависит от модели. Доступно: ${leftLabel}`
-              : `Один запрос списывает 1 генерацию. Доступно: ${leftLabel}`}
+            Расход Neurons зависит от модели. Доступно: {leftLabel}
+            {me.usage.resets_at ? ' · пополнение каждую неделю' : ' · без подписки не пополняется'}
           </p>
           <button
             type="submit"

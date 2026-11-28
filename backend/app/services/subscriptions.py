@@ -3,14 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.utils import aware, ensure_aware, utcnow
 from app.models import (
-    Generation,
     Product,
     Subscription,
     SubscriptionStatus,
@@ -35,27 +34,6 @@ async def get_active(session: AsyncSession, user_id: UUID) -> Subscription | Non
         .limit(1)
     )
     return await session.scalar(stmt)
-
-
-async def _used_free_requests(session: AsyncSession, user_id: UUID) -> int:
-    """Free quota covers both studio generations and chat requests."""
-    generations = int(
-        await session.scalar(
-            select(func.count(Generation.id)).where(Generation.user_id == user_id)
-        )
-        or 0
-    )
-    # Usage events survive chat history cleanup: clearing a chat must not
-    # give the user extra free requests.
-    messages = int(
-        await session.scalar(
-            select(func.count(UsageEvent.id)).where(
-                UsageEvent.user_id == user_id, UsageEvent.kind == "chat"
-            )
-        )
-        or 0
-    )
-    return generations + messages
 
 
 async def _used_neurons(
@@ -85,21 +63,38 @@ async def _used_neurons(
     return total
 
 
-async def _used_free_neurons(session: AsyncSession, user_id: UUID) -> float:
-    """Neurons spent without a subscription; paid usage has its own quota."""
-    return await _used_neurons(session, user_id)
+def _period_length() -> timedelta:
+    return timedelta(days=max(settings.subscription_period_days, 1))
 
 
-def _generation_limit(user: User, base: int) -> int:
-    return max(base + int(user.generations_bonus or 0), 0)
+def _current_period(sub: Subscription) -> tuple[datetime, datetime]:
+    """Return the active weekly window without changing the database row.
+
+    A paid plan refills 7 days after the previous window ends. Free accounts
+    never call this: their lifetime budget is never topped up.
+    """
+    now = utcnow()
+    start = aware(sub.current_period_start)
+    end = aware(sub.current_period_end)
+    expires = aware(sub.expires_at)
+    if end <= now and now < expires:
+        start = now
+        end = min(start + _period_length(), expires)
+    return start, min(end, expires)
+
+
+async def _sync_period(session: AsyncSession, sub: Subscription) -> None:
+    start, end = _current_period(sub)
+    if start != aware(sub.current_period_start) or end != aware(sub.current_period_end):
+        sub.current_period_start = start
+        sub.current_period_end = end
+        await session.flush()
 
 
 def _neuron_limit(user: User, base: float) -> float:
-    """An admin override applies to any user; without it, paid users have no cap."""
+    """Plan allowance plus personal bonus; an override replaces the plan value."""
     if user.neurons_limit_override is not None:
-        return max(float(user.neurons_limit_override) + float(user.neurons_bonus or 0), 0.0)
-    if base <= 0:
-        return 0.0
+        base = float(user.neurons_limit_override)
     return max(base + float(user.neurons_bonus or 0), 0.0)
 
 
@@ -110,98 +105,80 @@ async def free_neuron_limit(session: AsyncSession) -> float:
     )
 
 
-async def _paid_neuron_usage(
-    session: AsyncSession, user: User, sub: Subscription
-) -> tuple[float, float]:
-    limit = _neuron_limit(user, 0.0)
-    if limit <= 0:
-        return 0.0, 0.0
-    used = await _used_neurons(
-        session, user.id, subscription_id=sub.id, since=sub.current_period_start
-    )
-    return used, limit
+async def reserve_slot(
+    session: AsyncSession, user: User
+) -> tuple[bool, Subscription | None, bool, float, float]:
+    """Check the Neuron quota while holding the user row for the whole request.
+
+    The provider call can take seconds. Without this lock, parallel requests
+    all pass the same "last Neurons" check and overspend the account. Postgres
+    serializes on the user row; SQLite is single-writer and needs no FOR UPDATE.
+    The caller must commit or roll back the session to release the lock.
+    """
+    stmt = select(User.id).where(User.id == user.id)
+    bind = session.bind
+    if bind is not None and bind.dialect.name != "sqlite":
+        stmt = stmt.with_for_update()
+    await session.execute(stmt)
+    return await check_limit(session, user)
 
 
 async def check_limit(
     session: AsyncSession, user: User
-) -> tuple[bool, Subscription | None, bool, float, float, float, float]:
-    """Return (allowed, subscription, is_free, used, limit, neurons_used, neurons_limit)."""
+) -> tuple[bool, Subscription | None, bool, float, float]:
+    """Return (allowed, subscription, is_free, neurons_used, neurons_limit)."""
     sub = await get_active(session, user.id)
     if sub is not None:
-        now = utcnow()
-        if aware(sub.current_period_end) <= now:
-            # Prepaid multi-month plan: start a fresh quota period.
-            duration = max(
-                (aware(sub.expires_at) - aware(sub.current_period_start)).days,
-                1,
-            )
-            sub.current_period_start = now
-            sub.current_period_end = now + timedelta(days=min(duration, 30))
-            sub.generations_used = 0
-            await session.flush()
-        limit = _generation_limit(user, sub.generations_limit)
-        used = sub.generations_used
-        neurons_used, neurons_limit = await _paid_neuron_usage(session, user, sub)
-        allowed = used < limit and (neurons_limit <= 0 or neurons_used < neurons_limit)
-        return allowed, sub, False, used, limit, neurons_used, neurons_limit
+        await _sync_period(session, sub)
+        limit = _neuron_limit(user, float(sub.neurons_per_week or 0))
+        used = await _used_neurons(
+            session, user.id, subscription_id=sub.id, since=sub.current_period_start
+        )
+        return used < limit, sub, False, used, limit
 
-    neurons_limit = _neuron_limit(user, await free_neuron_limit(session))
-    neurons_used = await _used_free_neurons(session, user.id)
-    used = await _used_free_requests(session, user.id)
-    free_limit = await settings_service.get_int(
-        session, "free_generations", settings.free_generations
+    # Without a subscription the budget is lifetime: old usage is never reset.
+    limit = _neuron_limit(user, await free_neuron_limit(session))
+    used = await _used_neurons(session, user.id)
+    return used < limit, None, True, used, limit
+
+
+async def subscription_neuron_usage(
+    session: AsyncSession, sub: Subscription
+) -> tuple[float, float]:
+    """(used, limit) for the current weekly window of a given subscription."""
+    start, _end = _current_period(sub)
+    used = await _used_neurons(
+        session, sub.user_id, subscription_id=sub.id, since=start
     )
-    return (
-        neurons_used < neurons_limit,
-        None,
-        True,
-        used,
-        _generation_limit(user, free_limit),
-        neurons_used,
-        neurons_limit,
-    )
-
-
-async def record_generation(session: AsyncSession, sub: Subscription | None) -> None:
-    if sub is not None:
-        sub.generations_used += 1
-        await session.commit()
+    return used, float(sub.neurons_per_week or 0)
 
 
 async def usage(session: AsyncSession, user: User) -> UsageOut:
     sub = await get_active(session, user.id)
     if sub is not None:
-        limit = _generation_limit(user, sub.generations_limit)
-        neurons_used, neurons_limit = await _paid_neuron_usage(session, user, sub)
+        _start, end = _current_period(sub)
+        limit = _neuron_limit(user, float(sub.neurons_per_week or 0))
+        used = await _used_neurons(
+            session, user.id, subscription_id=sub.id, since=sub.current_period_start
+        )
         return UsageOut(
             has_subscription=True,
             plan_title=sub.product.title if sub.product else None,
-            generations_limit=limit,
-            generations_used=sub.generations_used,
-            generations_left=max(limit - sub.generations_used, 0),
-            free_generations_left=0,
-            neurons_limit=neurons_limit,
-            neurons_used=neurons_used,
-            neurons_left=max(neurons_limit - neurons_used, 0.0),
+            neurons_limit=limit,
+            neurons_used=used,
+            neurons_left=max(limit - used, 0.0),
+            resets_at=end,
             expires_at=sub.expires_at,
         )
 
-    free_limit = await settings_service.get_int(
-        session, "free_generations", settings.free_generations
-    )
-    used = await _used_free_requests(session, user.id)
-    neuron_limit = _neuron_limit(user, await free_neuron_limit(session))
-    neuron_used = await _used_free_neurons(session, user.id)
-    generation_limit = _generation_limit(user, free_limit)
+    limit = _neuron_limit(user, await free_neuron_limit(session))
+    used = await _used_neurons(session, user.id)
     return UsageOut(
         has_subscription=False,
-        generations_limit=generation_limit,
-        generations_used=used,
-        generations_left=0,
-        free_generations_left=max(generation_limit - used, 0),
-        neurons_limit=neuron_limit,
-        neurons_used=neuron_used,
-        neurons_left=max(neuron_limit - neuron_used, 0.0),
+        neurons_limit=limit,
+        neurons_used=used,
+        neurons_left=max(limit - used, 0.0),
+        resets_at=None,
     )
 
 
@@ -214,12 +191,14 @@ async def create_or_extend(
 ) -> Subscription:
     now = utcnow()
     duration = timedelta(days=product.duration_days or 30)
+    weekly = float(product.neurons_per_week or 0)
     current = await get_active(session, user.id)
 
     if current is not None and current.product_id == product.id:
         current.expires_at = max(aware(current.expires_at), now) + duration
-        current.current_period_end = current.expires_at
-        current.generations_limit += product.generations_per_month or 0
+        current.neurons_per_week = weekly
+        if aware(current.current_period_end) > aware(current.expires_at):
+            current.current_period_end = aware(current.expires_at)
         current.status = SubscriptionStatus.ACTIVE.value
         current.source_order_id = order_id
         await session.flush()
@@ -235,11 +214,10 @@ async def create_or_extend(
         status=SubscriptionStatus.ACTIVE.value,
         started_at=now,
         current_period_start=now,
-        current_period_end=now + duration,
+        current_period_end=min(now + _period_length(), now + duration),
         expires_at=now + duration,
         auto_renew=False,
-        generations_limit=product.generations_per_month or 0,
-        generations_used=0,
+        neurons_per_week=weekly,
         source_order_id=order_id,
     )
     session.add(sub)

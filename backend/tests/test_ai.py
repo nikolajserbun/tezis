@@ -22,6 +22,20 @@ async def test_mock_story_contains_full_plan_and_author_material(session, user) 
     assert "вопрос" in result.text.lower()
 
 
+async def test_generation_escapes_dynamic_html(session, user) -> None:
+    result = await ai.generate(
+        session,
+        user=user,
+        brand=None,
+        kind="post",
+        platform="telegram",
+        topic="<script>alert(1)</script>",
+    )
+    assert "<script>" not in result.result
+    assert "&lt;script&gt;" in result.result
+    assert "<b>Тема</b>" in result.result
+
+
 async def test_mock_post_is_enriched_with_author_blocks(session, user) -> None:
     result = await ai.MockProvider().generate(
         kind="post",

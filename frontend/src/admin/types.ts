@@ -18,6 +18,7 @@ export interface Config {
   app_name: string
   bot_username: string
   app_env: string
+  dev_features_enabled?: boolean
 }
 
 export interface TelegramLoginPayload {

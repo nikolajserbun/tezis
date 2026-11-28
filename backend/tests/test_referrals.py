@@ -8,7 +8,7 @@ from app.models import UsageEvent
 from app.services import ai, chat, referrals
 
 
-async def test_referral_bonus_after_first_request(session, user, referrer) -> None:
+async def test_referral_bonus_after_first_request(session, user, referrer, fake_chat_llm) -> None:
     referral = await referrals.capture_referral(session, user, referrer.referral_code)
     await session.commit()
     assert referral is not None
@@ -16,7 +16,6 @@ async def test_referral_bonus_after_first_request(session, user, referrer) -> No
     await chat.ask(
         session,
         user=user,
-        brand=None,
         message="Расскажи про тарифы",
         web_search=False,
     )
@@ -26,7 +25,6 @@ async def test_referral_bonus_after_first_request(session, user, referrer) -> No
     await chat.ask(
         session,
         user=user,
-        brand=None,
         message="А про рефералы?",
         web_search=False,
     )
@@ -57,7 +55,7 @@ async def test_first_studio_generation_also_activates_bonus(session, user, refer
     assert referrer.balance_minor == 2500
 
 
-async def test_no_bonus_when_quota_is_exhausted(session, user, referrer) -> None:
+async def test_no_bonus_when_quota_is_exhausted(session, user, referrer, fake_chat_llm) -> None:
     await referrals.capture_referral(session, user, referrer.referral_code)
     await session.commit()
 
@@ -65,7 +63,6 @@ async def test_no_bonus_when_quota_is_exhausted(session, user, referrer) -> None
     await chat.ask(
         session,
         user=user,
-        brand=None,
         message="Первый вопрос",
         web_search=False,
     )
@@ -81,7 +78,6 @@ async def test_no_bonus_when_quota_is_exhausted(session, user, referrer) -> None
         await chat.ask(
             session,
             user=user,
-            brand=None,
             message="Ещё вопрос",
             web_search=False,
         )

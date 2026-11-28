@@ -13,7 +13,6 @@ def defaults() -> dict[str, Any]:
     return {
         "support_username": "tezis_support",
         "referral_bonus_minor": settings.referral_bonus_minor,
-        "free_generations": settings.free_generations,
         "free_neurons": settings.free_neurons,
         "maintenance_mode": False,
         "community_chat_id": settings.community_chat_id,

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { EmptyState, ErrorState, PageHeader, Spinner } from '../components/ui'
-import { money, plural } from '../lib/format'
+import { money, neurons, plural } from '../lib/format'
 import type { Invoice, Order, Product } from '../lib/api'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle, OrdersList, StarsPrice } from './parts'
@@ -20,7 +20,7 @@ export function ShopScreen() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const path = kind === 'all' ? '/api/v1/catalog' : `/api/v1/catalog?kind=${kind}`
   const catalog = useMiniApi<Product[]>(path)
-  const isDev = config.app_env !== 'prod'
+  const isDev = config.dev_payments_enabled ?? config.app_env === 'dev'
 
   const buyStars = async (product: Product): Promise<void> => {
     setBusyId(product.id)
@@ -138,16 +138,8 @@ export function ShopScreen() {
                           {product.duration_days} {plural(product.duration_days, ['день', 'дня', 'дней'])}
                         </span>
                       )}
-                      {product.generations_per_month !== null && (
-                        <span>
-                          {product.generations_per_month}{' '}
-                          {plural(product.generations_per_month, [
-                            'генерация',
-                            'генерации',
-                            'генераций',
-                          ])}{' '}
-                          в месяц
-                        </span>
+                      {product.kind === 'subscription' && product.neurons_per_week > 0 && (
+                        <span>{neurons(product.neurons_per_week)} Neurons в неделю</span>
                       )}
                       <span>{product.brand_limit} бренд-профиля</span>
                     </div>

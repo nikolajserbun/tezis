@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { EmptyState, ErrorState, Field, Modal, PageHeader, Spinner } from '../components/ui'
-import { copyToClipboard, date, neurons, plural, plainText } from '../lib/format'
+import { copyToClipboard, date, neurons, plainText } from '../lib/format'
 import type { BrandProfile, Generation } from '../lib/api'
 import { useMini, useMiniApi } from './context'
 import { BlockTitle } from './parts'
@@ -33,10 +33,7 @@ function labelFor<T extends string>(items: { value: T; label: string }[], value:
 
 export function StudioScreen() {
   const { me, run, refreshMe, notify, haptic } = useMini()
-  const neuronLimited = me.usage.neurons_limit > 0
-  const leftLabel = neuronLimited
-    ? neurons(me.usage.neurons_left)
-    : plural(me.usage.generations_left, ['генерация', 'генерации', 'генераций'])
+  const leftLabel = neurons(me.usage.neurons_left)
   const [brand, setBrand] = useState<BrandProfile>(EMPTY_BRAND)
   const [savingBrand, setSavingBrand] = useState(false)
   const [kind, setKind] = useState<GenerationKind>('post')

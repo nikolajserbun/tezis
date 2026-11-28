@@ -9,7 +9,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.errors import PaymentError, ServiceUnavailable
+from app.core.errors import PaymentError
+from app.core.text import safe_html
 from app.core.utils import utcnow
 from app.models import BrandProfile, Generation, UsageEvent, User
 from app.services import llm, referrals, subscriptions
@@ -304,6 +305,7 @@ class MockProvider(AIProvider):
                 tone=tone,
                 platform_label=platform_label,
             )
+        text = safe_html(text)
         tokens = max(120, len(text) // 4)
         return AIResult(text=text, tokens=tokens, neurons=llm.estimate_neurons(tokens))
 
@@ -331,7 +333,9 @@ class OpenAIProvider(AIProvider):
         )
         completion = await llm.complete_with_usage(messages, temperature=0.7)
         return AIResult(
-            text=completion.text, tokens=completion.tokens, neurons=completion.neurons
+            text=safe_html(completion.text),
+            tokens=completion.tokens,
+            neurons=completion.neurons,
         )
 
 
@@ -352,21 +356,19 @@ async def generate(
     instruction: str | None = None,
     source_text: str | None = None,
 ) -> Generation:
-    allowed, sub, is_free, _used, _limit, neurons_used, neurons_limit = (
-        await subscriptions.check_limit(session, user)
+    allowed, sub, is_free, _used, neurons_limit = (
+        await subscriptions.reserve_slot(session, user)
     )
     if not allowed:
-        if neurons_limit > 0 and neurons_used >= neurons_limit:
-            raise PaymentError(
-                f"Лимит {neurons_limit:g} Neurons исчерпан. "
-                "Оформите подписку или обратитесь к владельцу."
-            )
         if is_free:
             raise PaymentError(
                 f"Лимит {neurons_limit:g} Neurons исчерпан. "
                 "Оформите подписку, чтобы продолжить."
             )
-        raise PaymentError("Лимит генераций исчерпан. Оформите подписку или продлите её.")
+        raise PaymentError(
+            f"Лимит {neurons_limit:g} Neurons на этой неделе исчерпан. "
+            "Обратитесь к владельцу или дождитесь обновления."
+        )
 
     try:
         result = await get_provider().generate(
@@ -377,7 +379,11 @@ async def generate(
             instruction=instruction,
             source_text=source_text,
         )
-    except ServiceUnavailable:
+    except Exception:
+        # Release the quota row lock as soon as the provider fails; the
+        # request dependency would roll back later, but other requests would
+        # wait on the lock until then.
+        await session.rollback()
         raise
 
     cost = max(result.tokens, 0) * settings.ai_cost_per_1k_minor // 1000
@@ -401,8 +407,6 @@ async def generate(
             cost_minor=cost,
         )
     )
-    if sub is not None:
-        sub.generations_used += 1
     await referrals.accrue_for_first_request(session, user)
     await session.commit()
     await session.refresh(generation)

@@ -11,6 +11,7 @@ from app.bot import keyboards as kb
 from app.bot.helpers import answer_message, callback_part, callback_parts, edit_message
 from app.bot.states import Content
 from app.core.errors import AppError
+from app.core.text import safe_html
 from app.core.utils import chunk_text
 from app.models import BrandProfile, Generation, User
 from app.services import ai
@@ -53,7 +54,7 @@ async def _send_generation(
     for index, chunk in enumerate(chunks):
         last = index == len(chunks) - 1
         await message.answer(
-            chunk,
+            safe_html(chunk),
             reply_markup=kb.generation_actions(str(generation.id)) if last else None,
             disable_web_page_preview=True,
         )

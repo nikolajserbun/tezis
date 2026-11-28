@@ -55,9 +55,38 @@ async def test_stars_payment_activates_subscription_once(session, user, product)
 
     sub = await subscriptions.get_active(session, user.id)
     assert sub is not None
-    assert sub.generations_limit == product.generations_per_month
+    assert sub.neurons_per_week == product.neurons_per_week
     subs_count = await session.scalar(select(func.count(Subscription.id)))
     assert subs_count == 1
+
+
+async def test_second_charge_cannot_activate_order_twice(
+    session, user, product
+) -> None:
+    order = await orders.create_order(session, user, product_id=product.id)
+    first, created = await payments.confirm_stars_payment(
+        session,
+        order_id=order.id,
+        user_tg_id=user.tg_id,
+        charge_id="charge-first",
+        amount_stars=order.total_stars,
+    )
+    second, created_again = await payments.confirm_stars_payment(
+        session,
+        order_id=order.id,
+        user_tg_id=user.tg_id,
+        charge_id="charge-second",
+        amount_stars=order.total_stars,
+    )
+    assert created is True
+    assert created_again is False
+    assert first.id == second.id == order.id
+
+    payment_count = await session.scalar(select(func.count(Payment.id)))
+    sub = await subscriptions.get_active(session, user.id)
+    assert payment_count == 1
+    assert sub is not None
+    assert sub.neurons_per_week == product.neurons_per_week
 
 
 async def test_stars_payment_rejects_wrong_amount(session, user, product) -> None:

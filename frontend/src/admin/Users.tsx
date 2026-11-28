@@ -75,7 +75,6 @@ export default function UsersSection({ canManage }: { canManage: boolean }) {
   const [editing, setEditing] = useState<User | null>(null)
   const [isBlocked, setIsBlocked] = useState(false)
   const [delta, setDelta] = useState('')
-  const [bonusGenerations, setBonusGenerations] = useState('')
   const [bonusNeurons, setBonusNeurons] = useState('')
   const [neuronsLimit, setNeuronsLimit] = useState('')
   const { toast, notify, hideToast, busy, run } = useAdminActions()
@@ -97,7 +96,6 @@ export default function UsersSection({ canManage }: { canManage: boolean }) {
     setEditing(user)
     setIsBlocked(user.is_blocked)
     setDelta('')
-    setBonusGenerations(String(user.generations_bonus ?? 0))
     setBonusNeurons(String(user.neurons_bonus ?? 0))
     setNeuronsLimit(user.neurons_limit_override === null ? '' : String(user.neurons_limit_override))
   }
@@ -113,12 +111,10 @@ export default function UsersSection({ canManage }: { canManage: boolean }) {
     const body: {
       is_blocked: boolean
       balance_delta_minor?: number
-      generations_bonus: number
       neurons_bonus: number
       neurons_limit_override: number | null
     } = {
       is_blocked: isBlocked,
-      generations_bonus: Number(bonusGenerations) || 0,
       neurons_bonus: Number(bonusNeurons) || 0,
       neurons_limit_override: neuronsLimit.trim() === '' ? null : Number(neuronsLimit),
     }
@@ -189,7 +185,6 @@ export default function UsersSection({ canManage }: { canManage: boolean }) {
                         <td><span className="badge badge-neutral">{ROLE_LABELS[user.role] ?? user.role}</span></td>
                         <td className="whitespace-nowrap">{money(user.balance_minor)}</td>
                         <td className="whitespace-nowrap text-xs text-ink-600">
-                          <p>Доп. ген.: {user.generations_bonus}</p>
                           <p>Доп. Neurons: {user.neurons_bonus}</p>
                           <p>
                             Лимит:{' '}
@@ -256,17 +251,7 @@ export default function UsersSection({ canManage }: { canManage: boolean }) {
             </p>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Доп. генерации (±)" hint="Плюс добавить, минус забрать.">
-                <input
-                  className="input"
-                  type="number"
-                  step={1}
-                  value={bonusGenerations}
-                  onChange={(event) => setBonusGenerations(event.target.value)}
-                  placeholder="0"
-                />
-              </Field>
-              <Field label="Доп. Neurons (±)" hint="Прибавляется к лимиту ниже.">
+              <Field label="Доп. Neurons (±)" hint="Плюс добавить, минус забрать. Прибавляется к лимиту ниже.">
                 <input
                   className="input"
                   type="number"
